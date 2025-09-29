@@ -1,0 +1,36 @@
+# -------------------------------
+# Archivos de configuración sensibles
+# -------------------------------
+.env
+*.key
+*.pem
+*.sqlite3
+
+# -------------------------------
+# Archivos generados por Rasa
+# -------------------------------
+/models/
+/.rasa/
+/__pycache__/
+/logs/
+/tmp/
+
+# -------------------------------
+# Archivos del sistema operativo
+# -------------------------------
+.DS_Store
+Thumbs.db
+
+# -------------------------------
+# Archivos de Python
+# -------------------------------
+*.pyc
+*.pyo
+*.pyd
+*.swp
+
+# -------------------------------
+# Configuración de IDEs
+# -------------------------------
+.vscode/
+.idea/
