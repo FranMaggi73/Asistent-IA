@@ -1,14 +1,11 @@
-# main.py
+# main.py (sin cambios grandes)
 import asyncio
 import aiohttp
 from audio_listener import KeywordListener
 from dotenv import load_dotenv
 import os
 
-# Cargar variables de entorno
 load_dotenv()
-
-# Tomar la URL de Rasa (obligatorio desde .env)
 RASA_URL = os.getenv("RASA_URL")
 assert RASA_URL is not None, "❌ RASA_URL is not set in the .env file"
 
@@ -22,6 +19,8 @@ async def send_to_rasa(text: str):
             print("Responses from Rasa:", responses)
             for response in responses:
                 print(f"🤖 Rasa: {response.get('text')}")
+    # 🔁 Después de responder, volvemos a escuchar
+    print("✅ Listening for 'Jarvis' again...")
 
 async def main():
     listener = KeywordListener(callback=send_to_rasa)
