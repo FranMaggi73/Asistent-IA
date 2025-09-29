@@ -11,23 +11,24 @@
 # -------------------------------
 /models/
 /.rasa/
-/__pycache__/
 /logs/
 /tmp/
+
+# -------------------------------
+# Entorno virtual y librerías de Python
+# -------------------------------
+/venv/
+/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.swp
 
 # -------------------------------
 # Archivos del sistema operativo
 # -------------------------------
 .DS_Store
 Thumbs.db
-
-# -------------------------------
-# Archivos de Python
-# -------------------------------
-*.pyc
-*.pyo
-*.pyd
-*.swp
 
 # -------------------------------
 # Configuración de IDEs
