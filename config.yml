@@ -1,11 +1,26 @@
 recipe: default.v1
-language: en
+language: es  # Cambiar a español
 assistant_id: frosty-blend
+
 pipeline:
-- name: CompactLLMCommandGenerator
-  llm:
-    model_group: rasa_command_generation_model
-  flow_retrieval:
-    active: false
+  - name: CompactLLMCommandGenerator
+    llm:
+      model_group: rasa_command_generation_model
+      temperature: 0.5  # Menos creatividad = más conciso
+      max_tokens: 50  # Límite de tokens por respuesta
+    flow_retrieval:
+      active: false
+
 policies:
-- name: FlowPolicy
+  - name: FlowPolicy
+    llm:
+      model_group: rasa_response_generation_model
+      temperature: 0.5
+      max_tokens: 50 
+      system_prompt: |
+        You are Jarvis, a concise voice assistant.
+        CRITICAL RULES:
+        - Maximum 2 short sentences per response
+        - Be direct and avoid elaboration
+        - No greetings longer than "Hola"
+        - Respond in Spanish
