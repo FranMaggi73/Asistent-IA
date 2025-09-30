@@ -1,0 +1,24 @@
+version: "3.1"
+
+stories:
+- story: Saludo y respuesta LLM
+  steps:
+  - intent: greet
+  - action: utter_greet
+  - intent: ask_jarvis
+  - action: action_llm_response
+
+- story: Despedida
+  steps:
+  - intent: goodbye
+  - action: utter_goodbye
+
+- story: Abrir programa
+  steps:
+  - intent: open_desktop_item
+  - action: action_open_desktop_item
+
+- story: Listar accesos
+  steps:
+  - intent: list_desktop_items
+  - action: action_list_desktop_items

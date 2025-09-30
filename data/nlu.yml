@@ -1,0 +1,60 @@
+version: "3.1"
+
+nlu:
+- intent: greet
+  examples: |
+    - hola
+    - buenos días
+    - buenas tardes
+    - hey
+    - hola jarvis
+    - qué tal
+
+- intent: goodbye
+  examples: |
+    - adiós
+    - hasta luego
+    - nos vemos
+    - chao
+    - bye
+
+- intent: open_desktop_item
+  examples: |
+    - abre chrome
+    - abrir firefox
+    - ejecuta word
+    - lanza spotify
+    - inicia steam
+    - pon discord
+    - dame excel
+    - muestra visual studio
+    - carga zoom
+    - quiero abrir chrome
+    - necesito abrir word
+    - puedes abrir spotify
+    - podrías abrir excel
+    - me abres firefox
+    - abre el navegador
+    - ejecuta el editor
+    - lanza la aplicación de música
+    - inicia el juego
+
+- intent: list_desktop_items
+  examples: |
+    - qué accesos tengo
+    - lista mis accesos directos
+    - qué puedo abrir
+    - muéstrame mis accesos
+    - qué hay en mi escritorio
+    - qué programas tengo
+    - lista accesos
+
+- intent: chitchat
+  examples: |
+    - cómo estás
+    - qué tal estás
+    - cómo te va
+    - quién eres
+    - qué puedes hacer
+    - cuéntame algo
+    - estás ahí

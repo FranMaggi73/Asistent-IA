@@ -4,7 +4,6 @@
 # Desc: Client for communicating with Rasa server
 
 import requests
-import json
 import os
 from typing import Optional
 from dotenv import load_dotenv

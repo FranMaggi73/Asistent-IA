@@ -4,7 +4,6 @@
 # Desc: Wake word detection using Porcupine keyword spotting
 
 import pvporcupine
-import struct
 import numpy as np
 import sounddevice as sd
 import os
