@@ -1,6 +1,11 @@
+# audio_listener.py
+# Author: Claude Petit-Frere
+# Date: 11/14/24
+# Desc: Handles keyword detection, TTS, and sending user commands to Rasa
 
 import sounddevice as sd
 import torch
+import os
 from TTS.api import TTS
 from audioFunctions import recordAudio, whisperTranscription
 from rasa_client import RasaClient

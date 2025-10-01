@@ -3,15 +3,24 @@
 # Date: 11/14/24
 # Desc: Wake word detection using Porcupine keyword spotting
 
-import pvporcupine
+import os
 import numpy as np
 import sounddevice as sd
-import os
 from typing import Optional
 from dotenv import load_dotenv
 
 # Cargar variables de entorno
 load_dotenv()
+
+# Intentar importar porcupine
+try:
+    import pvporcupine
+    PORCUPINE_AVAILABLE = True
+except ImportError:
+    PORCUPINE_AVAILABLE = False
+    print("⚠️ pvporcupine not installed. Using fallback detection.")
+    print("   Install with: pip install pvporcupine")
+
 
 class WakeWordDetector:
     def __init__(self, keyword_path: str, model_path: Optional[str] = None, access_key: Optional[str] = None):
@@ -30,6 +39,10 @@ class WakeWordDetector:
         self.access_key = access_key or os.getenv("PICOVOICE_API_KEY")
         
         self.porcupine = None
+        
+        if not PORCUPINE_AVAILABLE:
+            print("⚠️ Porcupine not available. Using fallback detection.")
+            return
         
         if not self.access_key:
             print("⚠️ PICOVOICE_API_KEY not found in .env file")
@@ -62,12 +75,16 @@ class WakeWordDetector:
     def listen_for_wake_word(self) -> bool:
         """
         Escucha continuamente por el wake word usando streaming
+        
+        Returns:
+            True cuando se detecta el wake word
         """
         if self.porcupine is None:
             # Fallback: usar el método de recordAudio original
-            print("⚠️ Using fallback detection (press any key to continue)")
+            print("🎤 Press Enter or speak to continue (fallback mode)...", end='', flush=True)
             from audioFunctions import recordAudio
             recordAudio()  # Graba hasta silencio
+            print()
             return True
         
         try:
@@ -109,3 +126,26 @@ class WakeWordDetector:
                 self.porcupine.delete()
             except:
                 pass
+
+
+# Test del detector (opcional)
+if __name__ == "__main__":
+    import sys
+    
+    if len(sys.argv) < 2:
+        print("Usage: python wake_word_detector.py <path_to_keyword.ppn>")
+        sys.exit(1)
+    
+    keyword_path = sys.argv[1]
+    detector = WakeWordDetector(keyword_path)
+    
+    print("Testing wake word detector...")
+    print("Say 'Jarvis' to test (Ctrl+C to exit)")
+    
+    try:
+        while True:
+            detected = detector.listen_for_wake_word()
+            if detected:
+                print("✅ Wake word detected successfully!\n")
+    except KeyboardInterrupt:
+        print("\n👋 Test stopped")

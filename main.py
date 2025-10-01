@@ -1,3 +1,8 @@
+# main.py
+# Author: Claude Petit-Frere
+# Date: 11/14/24
+# Desc: Entry point for the assistant
+
 import asyncio
 import os
 import sys

@@ -6,7 +6,7 @@ intents:
   - open_desktop_item
   - list_desktop_items
   - chitchat
-  - ask_jarvis   # agregado para LLM
+  - ask_jarvis
 
 responses:
   utter_greet:
@@ -27,7 +27,7 @@ responses:
 actions:
   - action_open_desktop_item
   - action_list_desktop_items
-  - action_llm_response   # agregado para LLM
+  - action_llm_response
 
 session_config:
   session_expiration_time: 60

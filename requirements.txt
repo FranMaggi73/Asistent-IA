@@ -1,0 +1,2 @@
+instalar dependencias con pip
+pip install numpy==1.22.0 ; pip install scipy==1.10.1 sounddevice==0.4.6 librosa==0.10.1 pydub==0.25.1 ; pip install torch==2.0.1 torchaudio==2.0.1 ; pip install TTS==0.22.0 openai-whisper==20231117 ; pip install rasa==3.6.21 rasa-sdk==3.6.2 ; pip install pvporcupine==3.0.2 python-dotenv==1.0.0 requests==2.31.0 aiohttp==3.9.1 sqlalchemy==1.4.54

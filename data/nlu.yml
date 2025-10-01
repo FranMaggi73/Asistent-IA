@@ -22,6 +22,9 @@ nlu:
   examples: |
     - abre chrome
     - abrir firefox
+    - abrí Spotify
+    - abrime word
+    - abreme Excel
     - ejecuta word
     - lanza spotify
     - inicia steam

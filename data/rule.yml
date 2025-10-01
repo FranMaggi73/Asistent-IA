@@ -1,27 +1,27 @@
 version: "3.1"
 
 rules:
-- rule: Say goodbye
-  steps:
-  - intent: goodbye
-  - action: utter_goodbye
-
-- rule: Greet
+- rule: Saludo
   steps:
   - intent: greet
   - action: utter_greet
 
-- rule: LLM response
+- rule: Despedida
+  steps:
+  - intent: goodbye
+  - action: utter_goodbye
+
+- rule: Respuesta LLM
   steps:
   - intent: ask_jarvis
   - action: action_llm_response
 
-- rule: Open desktop item
+- rule: Abrir programa
   steps:
   - intent: open_desktop_item
   - action: action_open_desktop_item
 
-- rule: List desktop items
+- rule: Listar accesos
   steps:
   - intent: list_desktop_items
   - action: action_list_desktop_items

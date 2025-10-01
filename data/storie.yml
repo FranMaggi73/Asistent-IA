@@ -8,11 +8,6 @@ stories:
   - intent: ask_jarvis
   - action: action_llm_response
 
-- story: Despedida
-  steps:
-  - intent: goodbye
-  - action: utter_goodbye
-
 - story: Abrir programa
   steps:
   - intent: open_desktop_item
