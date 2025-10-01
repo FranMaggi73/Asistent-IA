@@ -22,25 +22,13 @@ nlu:
   examples: |
     - abre chrome
     - abrir firefox
-    - abrí Spotify
-    - abrime word
-    - abreme Excel
-    - ejecuta word
-    - lanza spotify
     - inicia steam
-    - pon discord
-    - dame excel
-    - muestra visual studio
-    - carga zoom
+    - ejecuta word
+    - lanza Discord
+    - muestra Visual Studio
+    - carga Zoom
     - quiero abrir chrome
     - necesito abrir word
-    - puedes abrir spotify
-    - podrías abrir excel
-    - me abres firefox
-    - abre el navegador
-    - ejecuta el editor
-    - lanza la aplicación de música
-    - inicia el juego
 
 - intent: list_desktop_items
   examples: |
@@ -51,6 +39,28 @@ nlu:
     - qué hay en mi escritorio
     - qué programas tengo
     - lista accesos
+
+- intent: play_music
+  examples: |
+    - pon Despacito
+    - reproduce Shape of You
+    - quiero escuchar música de Queen
+    - toca la canción de Shakira
+    - pon música de jazz
+    - reproducí algo de rock
+    - quiero escuchar una canción
+
+- intent: control_music
+  examples: |
+    - pausa la música
+    - continúa la canción
+    - sube el volumen
+    - baja el volumen
+    - detén la música
+    - para la canción
+    - silencia el audio
+    - aumenta volumen
+    - disminuye volumen
 
 - intent: chitchat
   examples: |

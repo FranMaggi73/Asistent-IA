@@ -11,11 +11,6 @@ rules:
   - intent: goodbye
   - action: utter_goodbye
 
-- rule: Respuesta LLM
-  steps:
-  - intent: ask_jarvis
-  - action: action_llm_response
-
 - rule: Abrir programa
   steps:
   - intent: open_desktop_item
@@ -25,3 +20,13 @@ rules:
   steps:
   - intent: list_desktop_items
   - action: action_list_desktop_items
+
+- rule: Reproducir música
+  steps:
+  - intent: play_music
+  - action: action_play_music
+
+- rule: Controlar música
+  steps:
+  - intent: control_music
+  - action: action_control_music
