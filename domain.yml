@@ -5,31 +5,35 @@ intents:
   - goodbye
   - open_desktop_item
   - list_desktop_items
+  - play_music
+  - control_music
   - chitchat
   - ask_jarvis
 
 responses:
   utter_greet:
-    - text: "Hola, soy Jarvis. ¿En qué puedo ayudarte?"
+    - text: "Hola, ¿en qué puedo ayudarte?"
+    - text: "Hola, dime"
   
   utter_goodbye:
-    - text: "Hasta luego!"
+    - text: "Hasta luego"
+    - text: "Adiós"
 
   utter_ask_desktop_item:
-    - text: "¿Qué acceso directo quieres abrir?"
+    - text: "¿Qué quieres abrir?"
   
   utter_iamabot:
-    - text: "Soy Jarvis, tu asistente de voz."
+    - text: "Soy Jarvis, tu asistente."
 
   utter_default:
-    - text: "No entendí eso. ¿Podrías reformular?"
+    - text: "No entendí. ¿Puedes repetir?"
 
 actions:
   - action_open_desktop_item
   - action_list_desktop_items
+  - action_play_music
+  - action_control_music
   - action_llm_response
-  - action_play_music       # nuevo
-  - action_control_music    # nuevo
 
 session_config:
   session_expiration_time: 60

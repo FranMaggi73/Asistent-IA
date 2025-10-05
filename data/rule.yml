@@ -30,3 +30,8 @@ rules:
   steps:
   - intent: control_music
   - action: action_control_music
+
+- rule: Fallback cuando no entiende
+  steps:
+  - intent: nlu_fallback
+  - action: action_default_fallback
