@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from audio_listener import KeywordListener
+# Importar la función que carga/retorna el modelo TTS (cached)
+from audioFunctions import get_tts_model
 
 
 class JarvisAssistant:
@@ -79,6 +81,20 @@ class JarvisAssistant:
         
         # Setup signal handlers
         self.setup_signal_handlers()
+
+        # -----------------------------
+        # CARGA DEL TTS AL INICIAR:
+        # Llamamos a get_tts_model() aquí para que el TTS se cargue una vez al inicio
+        # y quede cacheado por @lru_cache en audioFunctions.py.
+        # Esto puede retrasar un poco el arranque, pero la síntesis posterior será inmediata.
+        try:
+            print("⏳ Preloading TTS model (this may take a few seconds)...")
+            get_tts_model()  # Cached by lru_cache in audioFunctions.py
+            print("✅ TTS model preloaded and ready.")
+        except Exception as e:
+            print(f"⚠️  TTS preload failed: {e}")
+            # No interrumpimos el arranque: el sistema seguirá intentando cargar TTS a la primera síntesis.
+        # -----------------------------
         
         try:
             # Inicializar listener

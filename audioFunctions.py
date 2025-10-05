@@ -1,8 +1,3 @@
-# audioFunctions_patched.py
-# Patched audio functions for Jarvis (Coqui TTS + Whisper)
-# Includes robust registration of torch safe globals for Coqui TTS checkpoints
-# and optional Windows COM init for VLC/mmdevice audio issues.
-
 import warnings
 import importlib
 from functools import lru_cache
