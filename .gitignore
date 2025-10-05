@@ -17,7 +17,7 @@
 # -------------------------------
 # Entorno virtual y librerías de Python
 # -------------------------------
-/venv/
+/jarvis/
 /__pycache__/
 *.py[cod]
 *.pyo
