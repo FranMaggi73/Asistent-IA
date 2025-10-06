@@ -44,7 +44,7 @@ class ModelManager:
                     with warnings.catch_warnings():
                         warnings.filterwarnings("ignore", category=FutureWarning)
                         # OPTIMIZACIÓN: Usar modelo más rápido si CUDA no disponible
-                        model_size = "large" if device == "cuda" else "medium"
+                        model_size = "large" if device == "cuda" else "small"
                         self._whisper_model = whisper.load_model(model_size).to(device)
                     print(f"✅ Whisper loaded ({model_size})")
         return self._whisper_model

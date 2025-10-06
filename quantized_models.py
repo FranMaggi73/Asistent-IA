@@ -38,9 +38,9 @@ def get_optimized_whisper_model(use_quantization=True):
     
     # Determinar mejor modelo según hardware
     if device == "cuda":
-        model_size = "small"
+        model_size = "large"
     else:
-        model_size = "tiny"  # CPU: usar modelo más pequeño
+        model_size = "small"  # CPU: usar modelo más pequeño
     
     print(f"⏳ Loading Whisper ({model_size}, quantized={use_quantization})...")
     
