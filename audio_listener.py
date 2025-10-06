@@ -202,7 +202,7 @@ class KeywordListener:
                         sender_id=self.session_id
                     )
                 ),
-                timeout=10.0
+                timeout=20.0
             )
             
             # Cachear respuestas comunes y exitosas

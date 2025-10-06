@@ -8,7 +8,7 @@ intents:
   - play_music
   - control_music
   - chitchat
-  - ask_jarvis
+  - ask_jarvis  # Intent general para preguntas al LLM
 
 responses:
   utter_greet:
@@ -34,6 +34,7 @@ actions:
   - action_play_music
   - action_control_music
   - action_llm_response
+  - action_default_fallback
 
 session_config:
   session_expiration_time: 60

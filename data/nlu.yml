@@ -71,3 +71,26 @@ nlu:
     - qué puedes hacer
     - cuéntame algo
     - estás ahí
+
+- intent: ask_jarvis
+  examples: |
+    - qué es la inteligencia artificial
+    - explícame qué es python
+    - cuéntame sobre el espacio
+    - qué sabes sobre los dinosaurios
+    - cómo funciona internet
+    - qué es un agujero negro
+    - háblame sobre el clima
+    - qué opinas sobre la tecnología
+    - cuál es la capital de Francia
+    - quién fue Albert Einstein
+    - explícame la fotosíntesis
+    - cómo se hace una tortilla
+    - qué es el cambio climático
+    - recomiéndame una película
+    - cuéntame un chiste
+    - dame un consejo
+    - qué hora es
+    - qué día es hoy
+    - háblame de ti
+    - por qué el cielo es azul

@@ -80,7 +80,7 @@ class RasaClient:
             response = self.session.post(
                 self.webhook_url,
                 json=payload,
-                timeout=8  # Reducido de 10 a 8
+                timeout=20  # Reducido de 10 a 8
             )
             
             if response.status_code == 200:
@@ -141,7 +141,7 @@ class RasaClient:
         try:
             response = self.session.get(
                 f"{self.rasa_url}/status", 
-                timeout=3
+                timeout=20
             )
             self._is_available = (response.status_code == 200)
             return self._is_available
@@ -166,7 +166,7 @@ class RasaClient:
         
         try:
             # Check /status endpoint
-            response = self.session.get(f"{self.rasa_url}/status", timeout=3)
+            response = self.session.get(f"{self.rasa_url}/status", timeout=20)
             result['status_code'] = response.status_code
             
             if response.status_code == 200:

@@ -8,9 +8,93 @@ import vlc
 import yt_dlp
 from functools import lru_cache
 import threading
+import requests
+import json
 
 from rasa_sdk import Action, Tracker
 from rasa_sdk.executor import CollectingDispatcher
+
+
+# --- Ollama Client ---
+class OllamaClient:
+    def __init__(self, base_url: str = "http://localhost:11434", model: str = "llama3.2:3b"):
+        self.base_url = base_url
+        self.model = model
+        self.generate_url = f"{base_url}/api/generate"
+        self.chat_url = f"{base_url}/api/chat"
+        
+    def is_available(self) -> bool:
+        """Verifica si Ollama está disponible"""
+        try:
+            response = requests.get(f"{self.base_url}/api/tags", timeout=20)
+            return response.status_code == 200
+        except:
+            return False
+    
+    def generate(self, prompt: str, max_tokens: int = 150, temperature: float = 0.7) -> str:
+        """Genera respuesta usando Ollama"""
+        try:
+            payload = {
+                "model": self.model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": temperature,
+                    "num_predict": max_tokens
+                }
+            }
+            
+            response = requests.post(
+                self.generate_url,
+                json=payload,
+                timeout=20
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return result.get("response", "").strip()
+            else:
+                print(f"❌ Ollama error: {response.status_code}")
+                return None
+                
+        except requests.exceptions.Timeout:
+            print("⏱️  Ollama timeout")
+            return None
+        except Exception as e:
+            print(f"❌ Ollama error: {e}")
+            return None
+    
+    def chat(self, message: str, context: List[Dict] = None) -> str:
+        """Chat con contexto usando Ollama"""
+        try:
+            messages = context or []
+            messages.append({"role": "user", "content": message})
+            
+            payload = {
+                "model": self.model,
+                "messages": messages,
+                "stream": False
+            }
+            
+            response = requests.post(
+                self.chat_url,
+                json=payload,
+                timeout=20
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return result.get("message", {}).get("content", "").strip()
+            else:
+                return None
+                
+        except Exception as e:
+            print(f"❌ Ollama chat error: {e}")
+            return None
+
+
+# Instancia global de Ollama
+ollama_client = OllamaClient()
 
 
 # --- VLC Player singleton thread-safe ---
@@ -32,7 +116,7 @@ class VLCManager:
         if self._vlc_instance is None:
             with self._lock:
                 if self._vlc_instance is None:
-                    self._vlc_instance = vlc.Instance('--quiet')  # Modo silencioso
+                    self._vlc_instance = vlc.Instance('--quiet')
         return self._vlc_instance
     
     @property
@@ -64,12 +148,11 @@ def get_desktop_path() -> Path:
 
 class DesktopItemCache:
     """Cache inteligente con invalidación automática"""
-    def __init__(self, ttl=600):  # 10 minutos (aumentado)
+    def __init__(self, ttl=600):
         self._cache = None
         self._last_update = 0
         self._lock = threading.Lock()
         self.ttl = ttl
-        # NUEVO: Cache de nombres normalizados
         self._normalized_names = {}
     
     def get_items(self, force_refresh=False):
@@ -79,14 +162,13 @@ class DesktopItemCache:
         with self._lock:
             if force_refresh or self._cache is None or (current_time - self._last_update) > self.ttl:
                 desktop = get_desktop_path()
-                valid_extensions = {'.lnk', '.url', '.html', '.htm', '.exe'}  # Agregado .exe
+                valid_extensions = {'.lnk', '.url', '.html', '.htm', '.exe'}
                 
                 self._cache = [
                     f for f in desktop.iterdir() 
                     if f.is_file() and f.suffix.lower() in valid_extensions
                 ]
                 
-                # Pre-calcular nombres normalizados
                 self._normalized_names = {
                     f: self._normalize_text(f.stem) for f in self._cache
                 }
@@ -108,13 +190,12 @@ class DesktopItemCache:
 desktop_cache = DesktopItemCache()
 
 
-# --- OPTIMIZACIÓN: ActionOpenDesktopItem con fuzzy matching ---
+# --- ActionOpenDesktopItem ---
 class ActionOpenDesktopItem(Action):
     def name(self) -> Text:
         return "action_open_desktop_item"
     
     def _normalize_text(self, text: str) -> str:
-        """Normalización ultra-rápida"""
         text = text.lower().strip()
         return ''.join(
             c for c in unicodedata.normalize('NFD', text) 
@@ -122,7 +203,6 @@ class ActionOpenDesktopItem(Action):
         )
     
     def _extract_app_name(self, message: str) -> str:
-        """Extracción optimizada con set lookup"""
         ignore_words = {
             'abre','abrir','abrí','abri','ejecuta','ejecutar','lanza',
             'inicia','iniciar','pon','el','la','mi','por','favor',
@@ -138,7 +218,6 @@ class ActionOpenDesktopItem(Action):
     
     def _find_best_match(self, search_term: str, items: List[Path], 
                          normalized_cache: Dict[Path, str]) -> Path:
-        """Búsqueda optimizada con scoring mejorado"""
         search_norm = self._normalize_text(search_term)
         search_words = set(search_norm.split())
         
@@ -146,22 +225,19 @@ class ActionOpenDesktopItem(Action):
         best_score = 0
         
         for item in items:
-            item_name = normalized_cache[item]  # Usar cache pre-calculado
+            item_name = normalized_cache[item]
             item_words = set(item_name.split())
             
-            # Match exacto
             if search_norm == item_name:
                 return item
             
-            # Scoring mejorado
             if search_norm in item_name:
                 score = 100
             elif item_name in search_norm:
                 score = 90
-            elif search_norm.startswith(item_name[:3]):  # Prefijo de 3 chars
+            elif search_norm.startswith(item_name[:3]):
                 score = 85
             else:
-                # Intersección de palabras
                 common = search_words & item_words
                 if len(search_words) > 0:
                     score = (len(common) / len(search_words)) * 80
@@ -172,15 +248,13 @@ class ActionOpenDesktopItem(Action):
                 best_score = score
                 best_match = item
         
-        # Umbral más bajo (40 en vez de 50)
         return best_match if best_score > 40 else None
     
     def _open_file(self, file_path: Path) -> bool:
-        """Apertura de archivo optimizada"""
         try:
-            if os.name == 'nt':  # Windows
+            if os.name == 'nt':
                 os.startfile(str(file_path))
-            else:  # Linux/Mac
+            else:
                 subprocess.Popen(['xdg-open', str(file_path)], 
                                stdout=subprocess.DEVNULL, 
                                stderr=subprocess.DEVNULL)
@@ -202,7 +276,6 @@ class ActionOpenDesktopItem(Action):
             dispatcher.utter_message(text="No pude identificar el programa.")
             return []
         
-        # Usar cache con nombres normalizados
         desktop_items, normalized_names = desktop_cache.get_items()
         if not desktop_items:
             dispatcher.utter_message(text="No hay accesos en el escritorio.")
@@ -222,7 +295,7 @@ class ActionOpenDesktopItem(Action):
         return []
 
 
-# --- ActionListDesktopItems sin cambios importantes ---
+# --- ActionListDesktopItems ---
 class ActionListDesktopItems(Action):
     def name(self) -> Text:
         return "action_list_desktop_items"
@@ -256,7 +329,7 @@ class ActionListDesktopItems(Action):
         return []
 
 
-# --- OPTIMIZACIÓN CRÍTICA: ActionPlayMusic sin bloqueos ---
+# --- ActionPlayMusic ---
 class ActionPlayMusic(Action):
     def name(self) -> Text:
         return "action_play_music"
@@ -269,23 +342,21 @@ class ActionPlayMusic(Action):
             dispatcher.utter_message(text="No especificaste la canción.")
             return []
         
-        # Opciones ultra-optimizadas de yt-dlp
         ydl_opts = {
-            'format': 'bestaudio/worst',  # Acepta peor calidad si es más rápido
+            'format': 'bestaudio/worst',
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
-            'socket_timeout': 8,  # Reducido
-            'retries': 1,  # Solo 1 retry
+            'socket_timeout': 20,
+            'retries': 1,
             'extract_flat': False,
             'skip_download': False,
-            'nocheckcertificate': True,  # Evitar verificación SSL
+            'nocheckcertificate': True,
             'prefer_insecure': True
         }
         
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # OPTIMIZACIÓN: Solo extraer el primer resultado
                 info = ydl.extract_info(f"ytsearch1:{query}", download=False)
                 
                 if not info or 'entries' not in info or not info['entries']:
@@ -301,11 +372,9 @@ class ActionPlayMusic(Action):
             dispatcher.utter_message(text="Error al buscar la canción.")
             return []
         
-        # Detener reproducción actual
         if vlc_manager.player and vlc_manager.player.is_playing():
             vlc_manager.player.stop()
         
-        # Reproducir con manejo de errores mejorado
         try:
             media = vlc_manager.instance.media_new(url)
             vlc_manager.player = vlc_manager.instance.media_player_new()
@@ -320,7 +389,7 @@ class ActionPlayMusic(Action):
         return []
 
 
-# --- ActionControlMusic sin cambios ---
+# --- ActionControlMusic ---
 class ActionControlMusic(Action):
     def name(self) -> Text:
         return "action_control_music"
@@ -364,7 +433,61 @@ class ActionControlMusic(Action):
         return []
 
 
-# --- ActionDefaultFallback sin cambios ---
+# --- NUEVA: ActionLLMResponse con Ollama ---
+class ActionLLMResponse(Action):
+    def name(self) -> Text:
+        return "action_llm_response"
+    
+    def run(self, dispatcher: CollectingDispatcher, tracker: Tracker,
+            domain: Dict[Text, Any]) -> List[Dict[Text, Any]]:
+        
+        user_message = tracker.latest_message.get('text', '')
+        
+        if not user_message:
+            dispatcher.utter_message(text="No entendí tu pregunta.")
+            return []
+        
+        # Verificar disponibilidad de Ollama
+        if not ollama_client.is_available():
+            dispatcher.utter_message(
+                text="El servicio de IA no está disponible en este momento."
+            )
+            return []
+        
+        # Crear prompt con contexto de Jarvis
+        system_prompt = (
+            "Eres Jarvis, un asistente de voz inteligente y conciso. "
+            "Responde de manera breve, útil y en español. "
+            "Mantén tus respuestas en 2-3 oraciones máximo para que sean fáciles de escuchar. "
+            "Si no sabes algo, admítelo honestamente."
+        )
+        
+        full_prompt = f"{system_prompt}\n\nUsuario: {user_message}\nJarvis:"
+        
+        # Generar respuesta
+        print(f"🤖 Consultando a Ollama: {user_message}")
+        response = ollama_client.generate(
+            prompt=full_prompt,
+            max_tokens=50,  # Respuestas cortas
+            temperature=0.7
+        )
+        
+        if response:
+            # Limitar longitud para TTS
+            if len(response) > 300:
+                response = response[:297] + "..."
+            
+            dispatcher.utter_message(text=response)
+            print(f"💬 Respuesta: {response}")
+        else:
+            dispatcher.utter_message(
+                text="No pude generar una respuesta en este momento."
+            )
+        
+        return []
+
+
+# --- ActionDefaultFallback - Ahora redirige a LLM ---
 class ActionDefaultFallback(Action):
     def name(self) -> Text:
         return "action_default_fallback"
@@ -372,6 +495,17 @@ class ActionDefaultFallback(Action):
     def run(self, dispatcher: CollectingDispatcher, tracker: Tracker,
             domain: Dict[Text, Any]) -> List[Dict[Text, Any]]:
         
+        user_message = tracker.latest_message.get('text', '')
+        
+        # Intentar con Ollama si está disponible
+        if ollama_client.is_available():
+            print(f"🔄 Fallback -> LLM: {user_message}")
+            
+            # Usar ActionLLMResponse
+            llm_action = ActionLLMResponse()
+            return llm_action.run(dispatcher, tracker, domain)
+        
+        # Fallback tradicional si Ollama no disponible
         fallback_messages = [
             "No entendí. ¿Puedes repetir?",
             "No te entendí bien. Intenta de otra forma",
