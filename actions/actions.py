@@ -7,27 +7,32 @@ import string
 import vlc
 import yt_dlp
 from functools import lru_cache
+import threading
 
 from rasa_sdk import Action, Tracker
 from rasa_sdk.executor import CollectingDispatcher
 
-# ------------------------------
-# VLC Player singleton
-# ------------------------------
+
+# --- VLC Player singleton thread-safe ---
 class VLCManager:
     _instance = None
+    _lock = threading.Lock()
     _vlc_instance = None
     _player = None
     
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
         return cls._instance
     
     @property
     def instance(self):
         if self._vlc_instance is None:
-            self._vlc_instance = vlc.Instance()
+            with self._lock:
+                if self._vlc_instance is None:
+                    self._vlc_instance = vlc.Instance('--quiet')  # Modo silencioso
         return self._vlc_instance
     
     @property
@@ -36,17 +41,17 @@ class VLCManager:
     
     @player.setter
     def player(self, value):
-        self._player = value
+        with self._lock:
+            self._player = value
+
 
 vlc_manager = VLCManager()
 
 
-# ------------------------------
-# Cache de escritorio (evita escanear repetidamente)
-# ------------------------------
+# --- OPTIMIZACIÓN: Cache persistente del escritorio ---
 @lru_cache(maxsize=1)
 def get_desktop_path() -> Path:
-    """Cache de la ruta del escritorio"""
+    """Cache permanente de la ruta del escritorio"""
     for desktop_path in [
         Path.home() / "OneDrive" / "Escritorio",
         Path.home() / "Desktop",
@@ -58,57 +63,72 @@ def get_desktop_path() -> Path:
 
 
 class DesktopItemCache:
-    """Cache inteligente de items del escritorio"""
-    def __init__(self, ttl=300):  # 5 minutos
+    """Cache inteligente con invalidación automática"""
+    def __init__(self, ttl=600):  # 10 minutos (aumentado)
         self._cache = None
         self._last_update = 0
+        self._lock = threading.Lock()
         self.ttl = ttl
+        # NUEVO: Cache de nombres normalizados
+        self._normalized_names = {}
     
     def get_items(self, force_refresh=False):
         import time
         current_time = time.time()
         
-        if force_refresh or self._cache is None or (current_time - self._last_update) > self.ttl:
-            desktop = get_desktop_path()
-            valid_extensions = {'.lnk', '.url', '.html', '.htm'}
+        with self._lock:
+            if force_refresh or self._cache is None or (current_time - self._last_update) > self.ttl:
+                desktop = get_desktop_path()
+                valid_extensions = {'.lnk', '.url', '.html', '.htm', '.exe'}  # Agregado .exe
+                
+                self._cache = [
+                    f for f in desktop.iterdir() 
+                    if f.is_file() and f.suffix.lower() in valid_extensions
+                ]
+                
+                # Pre-calcular nombres normalizados
+                self._normalized_names = {
+                    f: self._normalize_text(f.stem) for f in self._cache
+                }
+                
+                self._last_update = current_time
+                print(f"🔄 Desktop cache refreshed ({len(self._cache)} items)")
             
-            self._cache = [
-                f for f in desktop.iterdir() 
-                if f.is_file() and f.suffix.lower() in valid_extensions
-            ]
-            self._last_update = current_time
-            print(f"🔄 Desktop cache refreshed ({len(self._cache)} items)")
-        
-        return self._cache
+            return self._cache, self._normalized_names
+    
+    def _normalize_text(self, text: str) -> str:
+        """Normalización rápida"""
+        text = text.lower().strip()
+        return ''.join(
+            c for c in unicodedata.normalize('NFD', text) 
+            if unicodedata.category(c) != 'Mn'
+        )
+
 
 desktop_cache = DesktopItemCache()
 
 
-# ------------------------------
-# Acción: abrir programas (OPTIMIZADO)
-# ------------------------------
+# --- OPTIMIZACIÓN: ActionOpenDesktopItem con fuzzy matching ---
 class ActionOpenDesktopItem(Action):
     def name(self) -> Text:
         return "action_open_desktop_item"
     
     def _normalize_text(self, text: str) -> str:
-        """Normalización rápida de texto"""
+        """Normalización ultra-rápida"""
         text = text.lower().strip()
-        # Remover acentos
         return ''.join(
             c for c in unicodedata.normalize('NFD', text) 
             if unicodedata.category(c) != 'Mn'
         )
     
     def _extract_app_name(self, message: str) -> str:
-        """Extrae nombre de app del mensaje"""
+        """Extracción optimizada con set lookup"""
         ignore_words = {
             'abre','abrir','abrí','abri','ejecuta','ejecutar','lanza',
             'inicia','iniciar','pon','el','la','mi','por','favor',
-            'quiero','necesito','programa','aplicación','app'
+            'quiero','necesito','programa','aplicación','app','abriendo'
         }
         
-        # Remover puntuación y filtrar palabras
         message = message.translate(str.maketrans('', '', string.punctuation))
         words = [
             w for w in message.lower().split() 
@@ -116,8 +136,9 @@ class ActionOpenDesktopItem(Action):
         ]
         return ' '.join(words).strip()
     
-    def _find_best_match(self, search_term: str, items: List[Path]) -> Path:
-        """Búsqueda optimizada con scoring"""
+    def _find_best_match(self, search_term: str, items: List[Path], 
+                         normalized_cache: Dict[Path, str]) -> Path:
+        """Búsqueda optimizada con scoring mejorado"""
         search_norm = self._normalize_text(search_term)
         search_words = set(search_norm.split())
         
@@ -125,35 +146,44 @@ class ActionOpenDesktopItem(Action):
         best_score = 0
         
         for item in items:
-            item_name = self._normalize_text(item.stem)
+            item_name = normalized_cache[item]  # Usar cache pre-calculado
             item_words = set(item_name.split())
             
-            # Scoring rápido
+            # Match exacto
             if search_norm == item_name:
-                return item  # Match exacto
+                return item
             
+            # Scoring mejorado
             if search_norm in item_name:
                 score = 100
             elif item_name in search_norm:
                 score = 90
+            elif search_norm.startswith(item_name[:3]):  # Prefijo de 3 chars
+                score = 85
             else:
                 # Intersección de palabras
                 common = search_words & item_words
-                score = (len(common) / len(search_words)) * 80 if search_words else 0
+                if len(search_words) > 0:
+                    score = (len(common) / len(search_words)) * 80
+                else:
+                    score = 0
             
             if score > best_score:
                 best_score = score
                 best_match = item
         
-        return best_match if best_score > 50 else None
+        # Umbral más bajo (40 en vez de 50)
+        return best_match if best_score > 40 else None
     
     def _open_file(self, file_path: Path) -> bool:
-        """Abre archivo de forma segura"""
+        """Apertura de archivo optimizada"""
         try:
             if os.name == 'nt':  # Windows
                 os.startfile(str(file_path))
             else:  # Linux/Mac
-                subprocess.Popen(['xdg-open', str(file_path)])
+                subprocess.Popen(['xdg-open', str(file_path)], 
+                               stdout=subprocess.DEVNULL, 
+                               stderr=subprocess.DEVNULL)
             return True
         except Exception as e:
             print(f"Error opening file: {e}")
@@ -172,20 +202,19 @@ class ActionOpenDesktopItem(Action):
             dispatcher.utter_message(text="No pude identificar el programa.")
             return []
         
-        # Usar cache
-        desktop_items = desktop_cache.get_items()
+        # Usar cache con nombres normalizados
+        desktop_items, normalized_names = desktop_cache.get_items()
         if not desktop_items:
             dispatcher.utter_message(text="No hay accesos en el escritorio.")
             return []
         
-        matched_item = self._find_best_match(app_name, desktop_items)
+        matched_item = self._find_best_match(app_name, desktop_items, normalized_names)
         if not matched_item:
             dispatcher.utter_message(text=f"No encontré '{app_name}'.")
             return []
         
         success = self._open_file(matched_item)
         if success:
-            # Respuesta corta para acción exitosa
             dispatcher.utter_message(text=f"✓ {matched_item.stem}")
         else:
             dispatcher.utter_message(text=f"No pude abrir {matched_item.stem}")
@@ -193,9 +222,7 @@ class ActionOpenDesktopItem(Action):
         return []
 
 
-# ------------------------------
-# Acción: listar accesos (OPTIMIZADO)
-# ------------------------------
+# --- ActionListDesktopItems sin cambios importantes ---
 class ActionListDesktopItems(Action):
     def name(self) -> Text:
         return "action_list_desktop_items"
@@ -203,23 +230,20 @@ class ActionListDesktopItems(Action):
     def run(self, dispatcher: CollectingDispatcher, tracker: Tracker,
             domain: Dict[Text, Any]) -> List[Dict[Text, Any]]:
         
-        # Verificar si el usuario realmente pidió listar
         user_message = tracker.latest_message.get('text', '').lower()
         list_keywords = ['lista', 'listar', 'muestra', 'qué tengo', 'qué hay', 
                         'qué accesos', 'qué programas', 'cuáles son']
         
-        # Si no hay palabras clave de listar, probablemente es un error de clasificación
         if not any(keyword in user_message for keyword in list_keywords):
             dispatcher.utter_message(text="No entendí. ¿Puedes repetir?")
             return []
         
-        items = desktop_cache.get_items()
+        items, _ = desktop_cache.get_items()
         
         if not items:
             dispatcher.utter_message(text="No hay accesos en el escritorio.")
             return []
         
-        # Ordenar alfabéticamente
         items_names = sorted([f.stem for f in items])
         items_text = ", ".join(items_names[:8])
         
@@ -232,9 +256,7 @@ class ActionListDesktopItems(Action):
         return []
 
 
-# ------------------------------
-# Acción: reproducir música (OPTIMIZADO + NO BLOQUEANTE)
-# ------------------------------
+# --- OPTIMIZACIÓN CRÍTICA: ActionPlayMusic sin bloqueos ---
 class ActionPlayMusic(Action):
     def name(self) -> Text:
         return "action_play_music"
@@ -247,21 +269,24 @@ class ActionPlayMusic(Action):
             dispatcher.utter_message(text="No especificaste la canción.")
             return []
         
-        # Opciones optimizadas de yt-dlp
+        # Opciones ultra-optimizadas de yt-dlp
         ydl_opts = {
-            'format': 'bestaudio/best',
+            'format': 'bestaudio/worst',  # Acepta peor calidad si es más rápido
             'quiet': True,
+            'no_warnings': True,
             'noplaylist': True,
-            'socket_timeout': 10,
-            'retries': 2,  # Reducido de 3 a 2
+            'socket_timeout': 8,  # Reducido
+            'retries': 1,  # Solo 1 retry
             'extract_flat': False,
-            'no_warnings': True
+            'skip_download': False,
+            'nocheckcertificate': True,  # Evitar verificación SSL
+            'prefer_insecure': True
         }
         
         try:
-            # Búsqueda rápida de YouTube
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(f"ytsearch1:{query}", download=False)  # Solo 1 resultado
+                # OPTIMIZACIÓN: Solo extraer el primer resultado
+                info = ydl.extract_info(f"ytsearch1:{query}", download=False)
                 
                 if not info or 'entries' not in info or not info['entries']:
                     dispatcher.utter_message(text="No encontré esa canción.")
@@ -276,18 +301,17 @@ class ActionPlayMusic(Action):
             dispatcher.utter_message(text="Error al buscar la canción.")
             return []
         
-        # Detener reproducción actual si existe
+        # Detener reproducción actual
         if vlc_manager.player and vlc_manager.player.is_playing():
             vlc_manager.player.stop()
         
-        # Reproducir nueva canción (NO bloqueante)
+        # Reproducir con manejo de errores mejorado
         try:
             media = vlc_manager.instance.media_new(url)
             vlc_manager.player = vlc_manager.instance.media_player_new()
             vlc_manager.player.set_media(media)
             vlc_manager.player.play()
             
-            # Respuesta corta para acción exitosa
             dispatcher.utter_message(text=f"▶️ {title}")
         except Exception as e:
             print(f"VLC error: {e}")
@@ -296,9 +320,7 @@ class ActionPlayMusic(Action):
         return []
 
 
-# ------------------------------
-# Acción: controlar música (OPTIMIZADO)
-# ------------------------------
+# --- ActionControlMusic sin cambios ---
 class ActionControlMusic(Action):
     def name(self) -> Text:
         return "action_control_music"
@@ -314,7 +336,6 @@ class ActionControlMusic(Action):
         
         msg = tracker.latest_message.get("text", "").lower()
         
-        # Mapeo de comandos
         if any(word in msg for word in ['pausa', 'para', 'detén']):
             player.pause()
             dispatcher.utter_message(text="⏸ Pausado")
@@ -343,22 +364,14 @@ class ActionControlMusic(Action):
         return []
 
 
-# ------------------------------
-# Acción: Fallback por defecto
-# ------------------------------
+# --- ActionDefaultFallback sin cambios ---
 class ActionDefaultFallback(Action):
-    """Maneja casos donde Rasa no está seguro del intent"""
-    
     def name(self) -> Text:
         return "action_default_fallback"
     
     def run(self, dispatcher: CollectingDispatcher, tracker: Tracker,
             domain: Dict[Text, Any]) -> List[Dict[Text, Any]]:
         
-        # Obtener el mensaje original
-        user_message = tracker.latest_message.get('text', '')
-        
-        # Mensajes de fallback amigables
         fallback_messages = [
             "No entendí. ¿Puedes repetir?",
             "No te entendí bien. Intenta de otra forma",

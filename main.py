@@ -1,23 +1,24 @@
-# main.py - OPTIMIZED
+# main.py - ULTRA OPTIMIZED con pre-carga paralela
 import asyncio
 import os
 import sys
 import signal
 from pathlib import Path
 from dotenv import load_dotenv
+from concurrent.futures import ThreadPoolExecutor
+import time
 
 # Cargar env antes de importar módulos
 load_dotenv()
 
 from audio_listener import KeywordListener
-# Importar la función que carga/retorna el modelo TTS (cached)
-from audioFunctions import get_tts_model
 
 
 class JarvisAssistant:
     def __init__(self):
         self.listener = None
         self.shutdown_event = asyncio.Event()
+        self.preload_executor = ThreadPoolExecutor(max_workers=2)
     
     def setup_signal_handlers(self):
         """Configura manejo de señales para shutdown limpio"""
@@ -50,12 +51,91 @@ class JarvisAssistant:
         
         return True
     
+    async def preload_models_parallel(self):
+        """
+        Pre-carga modelos pesados en paralelo para reducir tiempo de inicio
+        """
+        loop = asyncio.get_event_loop()
+        
+        def load_tts():
+            try:
+                print("⏳ [TTS] Loading...")
+                start = time.time()
+                from audioFunctions import get_tts_model
+                get_tts_model()
+                elapsed = time.time() - start
+                print(f"✅ [TTS] Loaded in {elapsed:.1f}s")
+                return True
+            except Exception as e:
+                print(f"⚠️  [TTS] Failed to preload: {e}")
+                return False
+        
+        def load_whisper():
+            try:
+                print("⏳ [Whisper] Loading...")
+                start = time.time()
+                from audioFunctions import model_manager
+                _ = model_manager.whisper  # Trigger lazy loading
+                elapsed = time.time() - start
+                print(f"✅ [Whisper] Loaded in {elapsed:.1f}s")
+                return True
+            except Exception as e:
+                print(f"⚠️  [Whisper] Failed to preload: {e}")
+                return False
+        
+        # Cargar ambos modelos en paralelo
+        print("\n🚀 Preloading AI models (parallel)...")
+        start_total = time.time()
+        
+        tasks = [
+            loop.run_in_executor(self.preload_executor, load_tts),
+            loop.run_in_executor(self.preload_executor, load_whisper)
+        ]
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        elapsed_total = time.time() - start_total
+        success_count = sum(1 for r in results if r is True)
+        
+        print(f"\n📊 Preload Summary: {success_count}/2 models loaded in {elapsed_total:.1f}s")
+        
+        if success_count == 0:
+            print("⚠️  No models were preloaded. System may be slower on first use.")
+        
+        return success_count > 0
+    
+    async def check_rasa_availability(self):
+        """Verifica disponibilidad de Rasa de forma asíncrona"""
+        from rasa_client import RasaClient
+        
+        print("\n🔍 Checking Rasa server...")
+        client = RasaClient()
+        
+        health = client.health_check()
+        
+        if health['available']:
+            print(f"✅ Rasa server: OK (v{health.get('version', 'unknown')})")
+            if not health.get('model_loaded'):
+                print("⚠️  Warning: No model loaded in Rasa")
+        else:
+            print("⚠️  Rasa server: NOT AVAILABLE")
+            print("   Start with: docker-compose up -d")
+            print("   Or: rasa run --enable-api --cors \"*\"")
+        
+        client.close()
+        return health['available']
+    
     async def run(self):
-        """Entry point principal"""
+        """Entry point principal con optimizaciones"""
         base_dir = Path(__file__).parent
         wake_word_file = base_dir / "keywords" / "jarvis_es_windows_v3_0_0.ppn"
         model_file = base_dir / "keywords" / "porcupine_params_es.pv"
         speaker_file = base_dir / "speaker.wav"
+        
+        # Banner inicial
+        print("=" * 60)
+        print("🎙️  JARVIS VOICE ASSISTANT (ULTRA OPTIMIZED v2.0)")
+        print("=" * 60)
         
         # Validar archivos
         if not self.validate_files(str(wake_word_file), str(speaker_file), 
@@ -67,37 +147,47 @@ class JarvisAssistant:
             print("⚠️  PICOVOICE_API_KEY not found in .env")
             print("   Wake word detection will use fallback mode\n")
         
-        # Banner
-        print("=" * 50)
-        print("🎙️  JARVIS VOICE ASSISTANT (OPTIMIZED)")
-        print("=" * 50)
+        # Configuración
         print(f"📂 Wake word: {wake_word_file.name}")
         print(f"🔊 Speaker: {speaker_file.name}")
         if model_file.exists():
             print(f"🌐 Language model: {model_file.name}")
         print(f"🔗 Rasa URL: {os.getenv('RASA_URL', 'http://localhost:5005')}")
-        print("=" * 50)
-        print()
+        print("=" * 60)
         
         # Setup signal handlers
         self.setup_signal_handlers()
-
-        # -----------------------------
-        # CARGA DEL TTS AL INICIAR:
-        # Llamamos a get_tts_model() aquí para que el TTS se cargue una vez al inicio
-        # y quede cacheado por @lru_cache en audioFunctions.py.
-        # Esto puede retrasar un poco el arranque, pero la síntesis posterior será inmediata.
+        
+        # ==============================================
+        # OPTIMIZACIÓN CRÍTICA: Pre-carga paralela
+        # ==============================================
         try:
-            print("⏳ Preloading TTS model (this may take a few seconds)...")
-            get_tts_model()  # Cached by lru_cache in audioFunctions.py
-            print("✅ TTS model preloaded and ready.")
+            # 1. Verificar Rasa (rápido)
+            rasa_task = asyncio.create_task(self.check_rasa_availability())
+            
+            # 2. Pre-cargar modelos (lento, en paralelo)
+            preload_task = asyncio.create_task(self.preload_models_parallel())
+            
+            # Esperar ambas tareas
+            rasa_ok, models_ok = await asyncio.gather(rasa_task, preload_task)
+            
+            if not rasa_ok:
+                print("\n⚠️  WARNING: Continuing without Rasa (limited functionality)")
+            
         except Exception as e:
-            print(f"⚠️  TTS preload failed: {e}")
-            # No interrumpimos el arranque: el sistema seguirá intentando cargar TTS a la primera síntesis.
-        # -----------------------------
+            print(f"\n⚠️  Preload error: {e}")
+            print("   Continuing with lazy loading...")
+        
+        # ==============================================
+        # Iniciar sistema principal
+        # ==============================================
+        print("\n" + "=" * 60)
+        print("✅ System ready! Say 'Jarvis' to activate")
+        print("=" * 60)
+        print()
         
         try:
-            # Inicializar listener
+            # Inicializar listener (ahora más rápido porque modelos ya están cargados)
             self.listener = KeywordListener(
                 wake_word_file=str(wake_word_file),
                 speaker_file=str(speaker_file),
@@ -133,6 +223,10 @@ class JarvisAssistant:
             # Cleanup
             if self.listener:
                 self.listener.cleanup()
+            
+            # Shutdown executor
+            self.preload_executor.shutdown(wait=False)
+            
             print("👋 Jarvis stopped. Goodbye!")
         
         return 0

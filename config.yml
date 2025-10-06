@@ -12,16 +12,21 @@ pipeline:
     min_ngram: 1
     max_ngram: 4
   - name: DIETClassifier
-    epochs: 50
+    epochs: 30  # Reducido de 50 a 30
     constrain_similarities: true
+    batch_size: [64, 256]  # Batches más grandes
+    evaluate_every_number_of_epochs: 10  # Menos evaluaciones
   - name: EntitySynonymMapper
   - name: ResponseSelector
-    epochs: 100
+    epochs: 50  # Reducido de 100 a 50
     constrain_similarities: true
+    batch_size: [64, 256]
 
 policies:
   - name: RulePolicy
+    core_fallback_threshold: 0.3  # Más tolerante
   - name: TEDPolicy
-    max_history: 5
-    epochs: 100
+    max_history: 3  # Reducido de 5 a 3 (menos contexto)
+    epochs: 50  # Reducido de 100 a 50
     constrain_similarities: true
+    batch_size: [32, 128]  # Batches más grandes
