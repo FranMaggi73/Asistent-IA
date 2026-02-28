@@ -1,11 +1,13 @@
 """
-Voice Activity Detection (VAD) ultra-rápido
+Voice Activity Detection (VAD) ultra-rápido (CORREGIDO)
 Evita transcribir audio sin voz (ahorra ~2s por false positive)
 """
 
 import numpy as np
+from numpy.typing import NDArray
 from scipy import signal
 from functools import lru_cache
+from typing import Union
 
 
 class FastVAD:
@@ -21,7 +23,7 @@ class FastVAD:
         self.zcr_threshold = zcr_threshold
         self.min_speech_duration = min_speech_duration
     
-    def contains_speech(self, audio_data: np.ndarray, 
+    def contains_speech(self, audio_data: NDArray[np.int16], 
                        sample_rate: int = 44100) -> bool:
         """
         Detecta si audio contiene voz (rápido, <10ms)
@@ -62,15 +64,15 @@ class FastVAD:
         print(f"✅ VAD: Speech detected (E={energy:.4f}, ZCR={zcr:.4f})")
         return True
     
-    def _calculate_zcr(self, audio: np.ndarray) -> float:
+    def _calculate_zcr(self, audio: NDArray[np.float32]) -> float:
         """Calcula Zero-Crossing Rate (rápido)"""
         # Contar cambios de signo
         signs = np.sign(audio)
         sign_changes = np.diff(signs) != 0
         zcr = np.sum(sign_changes) / len(audio)
-        return zcr
+        return float(zcr)
     
-    def preprocess_audio(self, audio_data: np.ndarray) -> np.ndarray:
+    def preprocess_audio(self, audio_data: NDArray[np.int16]) -> NDArray[np.float32]:
         """
         Preprocesamiento opcional: remover DC offset, normalizar
         """
@@ -81,19 +83,27 @@ class FastVAD:
         
         # Filtro pasa-altos (remover ruido bajo)
         sos = signal.butter(4, 80, 'hp', fs=44100, output='sos')
-        audio_filtered = signal.sosfilt(sos, audio_float)
+        
+        # scipy.signal.sosfilt puede retornar tuple o ndarray
+        result = signal.sosfilt(sos, audio_float)
+        
+        # Asegurar que devolvemos ndarray
+        if isinstance(result, tuple):
+            audio_filtered = result[0].astype(np.float32)
+        else:
+            audio_filtered = result.astype(np.float32)
         
         return audio_filtered
 
 
 # Singleton para evitar recrear filtros
 @lru_cache(maxsize=1)
-def get_vad_detector():
+def get_vad_detector() -> FastVAD:
     return FastVAD()
 
 
 # Integración con audioFunctions.py
-def whisperTranscription_with_vad(audio_data, language='es'):
+def whisperTranscription_with_vad(audio_data: NDArray[np.int16], language: str = 'es') -> str:
     """
     Drop-in replacement para whisperTranscription con VAD pre-filtrado
     """

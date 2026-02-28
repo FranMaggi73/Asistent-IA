@@ -1,13 +1,15 @@
-# audio_listener.py - Pipeline principal
+# audio_listener.py - Pipeline principal (CORREGIDO)
 import asyncio
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
+from typing import Optional
 
 from audioFunctions import recordAudio, whisperTranscription, generateAudio
 from intent_router import IntentRouter
-from action_handlers import dispatch
+# Importación corregida - debe estar en carpeta actions/
+from actions.action_handlers import dispatch
 from wake_word_detector import WakeWordDetector
 
 
@@ -16,18 +18,18 @@ executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="jarvis_worker")
 
 class KeywordListener:
     def __init__(self, wake_word_file: str, speaker_file: str,
-                 model_file: str = None):
+                 model_file: Optional[str] = None):  # Ahora Optional es explícito
         self.speaker_file = speaker_file
         self.session_id = str(uuid.uuid4())
 
         # Intent router (Ollama)
         self.router = IntentRouter()
 
-        # Wake word
-        self._wake_detector = None
+        # Wake word - inicializar correctamente con tipos opcionales
+        self._wake_detector: Optional[WakeWordDetector] = None
         self._wake_config = {
             "keyword_path": wake_word_file,
-            "model_path": model_file
+            "model_path": model_file  # Puede ser None
         }
 
         # Estadísticas
@@ -36,12 +38,14 @@ class KeywordListener:
         print("✅ Listener listo\n")
 
     @property
-    def wake_detector(self):
+    def wake_detector(self) -> WakeWordDetector:
         if self._wake_detector is None:
-            self._wake_detector = WakeWordDetector(**self._wake_config)
+            # Desempaquetar kwargs filtrando None
+            kwargs = {k: v for k, v in self._wake_config.items() if v is not None}
+            self._wake_detector = WakeWordDetector(**kwargs)
         return self._wake_detector
 
-    async def start_listening(self):
+    async def start_listening(self) -> None:
         print("=" * 50)
         print("🎙  Di 'Jarvis' para activar")
         print("=" * 50)
@@ -63,7 +67,7 @@ class KeywordListener:
                 print(f"❌ Error en loop: {e}")
                 await asyncio.sleep(0.5)
 
-    async def handle_command(self):
+    async def handle_command(self) -> None:
         start = time.time()
         loop = asyncio.get_event_loop()
 
@@ -132,7 +136,7 @@ class KeywordListener:
 
         return True
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         print("\n🧹 Limpiando recursos...")
         from audioFunctions import model_manager
         model_manager.unload_whisper()

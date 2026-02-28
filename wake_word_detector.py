@@ -1,16 +1,23 @@
-# wake_word_detector.py
+# wake_word_detector.py (CORREGIDO)
 # Author: Claude Petit-Frere
 # Date: 11/14/24
 # Desc: Wake word detection using Porcupine keyword spotting
 
 import os
 import numpy as np
+from numpy.typing import NDArray
 import sounddevice as sd
-from typing import Optional
+from typing import Optional, TYPE_CHECKING, Any
 from dotenv import load_dotenv
 
 # Cargar variables de entorno
 load_dotenv()
+
+# Type checking imports
+if TYPE_CHECKING:
+    import pvporcupine as pvporcupine_module
+else:
+    pvporcupine_module = None  # type: ignore
 
 # Intentar importar porcupine
 try:
@@ -18,6 +25,7 @@ try:
     PORCUPINE_AVAILABLE = True
 except ImportError:
     PORCUPINE_AVAILABLE = False
+    pvporcupine = None  # type: ignore
     print("⚠️ pvporcupine not installed. Using fallback detection.")
     print("   Install with: pip install pvporcupine")
 
@@ -38,9 +46,9 @@ class WakeWordDetector:
         # Usar API key del .env o la proporcionada
         self.access_key = access_key or os.getenv("PICOVOICE_API_KEY")
         
-        self.porcupine = None
+        self.porcupine: Optional[Any] = None  # pvporcupine.Porcupine
         
-        if not PORCUPINE_AVAILABLE:
+        if not PORCUPINE_AVAILABLE or pvporcupine is None:
             print("⚠️ Porcupine not available. Using fallback detection.")
             return
         
@@ -88,6 +96,7 @@ class WakeWordDetector:
             return True
         
         try:
+            # Ahora porcupine no es None, seguro acceder a atributos
             sample_rate = self.porcupine.sample_rate
             frame_length = self.porcupine.frame_length
             
@@ -102,9 +111,13 @@ class WakeWordDetector:
                 
                 while True:
                     audio_frame, _ = stream.read(frame_length)
-                    audio_frame = audio_frame.flatten()
+                    # Aplanar y convertir a int16 correctamente
+                    audio_frame_flat: NDArray[np.int16] = audio_frame.flatten().astype(np.int16)
                     
-                    keyword_index = self.porcupine.process(audio_frame)
+                    # Porcupine.process espera Sequence[int], convertimos
+                    audio_frame_list = audio_frame_flat.tolist()
+                    
+                    keyword_index = self.porcupine.process(audio_frame_list)
                     
                     if keyword_index >= 0:
                         print("🎯 'Jarvis' detected!        ")

@@ -1,4 +1,4 @@
-# main.py - Jarvis
+# main.py - Jarvis (CORREGIDO)
 import asyncio
 import os
 import sys
@@ -6,6 +6,7 @@ import signal
 import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -15,11 +16,11 @@ from audio_listener import KeywordListener
 
 class JarvisAssistant:
     def __init__(self):
-        self.listener = None
+        self.listener: Optional[KeywordListener] = None
         self.shutdown_event = asyncio.Event()
         self.preload_executor = ThreadPoolExecutor(max_workers=2)
 
-    def setup_signal_handlers(self):
+    def setup_signal_handlers(self) -> None:
         def handler(sig, frame):
             print("\n\n⚠️  Apagando Jarvis...")
             self.shutdown_event.set()
@@ -27,7 +28,7 @@ class JarvisAssistant:
         signal.signal(signal.SIGINT, handler)
         signal.signal(signal.SIGTERM, handler)
 
-    def validate_files(self, wake_word: str, speaker: str, model: str = None) -> bool:
+    def validate_files(self, wake_word: str, speaker: str, model: Optional[str] = None) -> bool:
         ok = True
         if not os.path.exists(wake_word):
             print(f"❌ Wake word no encontrado: {wake_word}")
@@ -39,7 +40,7 @@ class JarvisAssistant:
             print(f"⚠️  Modelo de idioma no encontrado: {model} (usando inglés)")
         return ok
 
-    def check_services(self):
+    def check_services(self) -> None:
         """Verifica servicios disponibles"""
         import requests
 
@@ -67,11 +68,11 @@ class JarvisAssistant:
             print("⚠️  Spotify no configurado — música no disponible")
             print("   Agregá SPOTIFY_CLIENT_ID y SPOTIFY_CLIENT_SECRET en .env")
 
-    async def preload_models(self):
+    async def preload_models(self) -> bool:
         """Pre-carga Whisper y TTS en paralelo al inicio"""
         loop = asyncio.get_event_loop()
 
-        def load_whisper():
+        def load_whisper() -> bool:
             try:
                 t = time.time()
                 from audioFunctions import model_manager
@@ -82,7 +83,7 @@ class JarvisAssistant:
                 print(f"⚠️  Whisper falló: {e}")
                 return False
 
-        def load_tts():
+        def load_tts() -> bool:
             try:
                 t = time.time()
                 from audioFunctions import get_tts_model
@@ -112,7 +113,7 @@ class JarvisAssistant:
 
         return ok > 0
 
-    async def run(self):
+    async def run(self) -> int:
         base = Path(__file__).parent
         wake_word = base / "keywords" / "jarvis_es_windows_v3_0_0.ppn"
         model_file = base / "keywords" / "porcupine_params_es.pv"
@@ -143,10 +144,13 @@ class JarvisAssistant:
         print("=" * 60 + "\n")
 
         try:
+            # Manejar model_file opcional correctamente
+            model_file_str: Optional[str] = str(model_file) if model_file.exists() else None
+            
             self.listener = KeywordListener(
                 wake_word_file=str(wake_word),
                 speaker_file=str(speaker),
-                model_file=str(model_file) if model_file.exists() else None
+                model_file=model_file_str  # Ahora es Optional[str]
             )
 
             listen_task   = asyncio.create_task(self.listener.start_listening())
@@ -180,7 +184,7 @@ class JarvisAssistant:
         return 0
 
 
-def main():
+def main() -> None:
     assistant = JarvisAssistant()
     sys.exit(asyncio.run(assistant.run()))
 

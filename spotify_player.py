@@ -1,11 +1,19 @@
-# spotify_player.py - Spotify API
+# spotify_player.py - Spotify API (CORREGIDO)
 # Requiere cuenta Spotify Premium para control de reproducción
 import os
 import time
-from typing import Optional
+from typing import Optional, TYPE_CHECKING, Any
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Type checking imports
+if TYPE_CHECKING:
+    import spotipy as spotipy_module
+    from spotipy.oauth2 import SpotifyOAuth as SpotifyOAuthClass
+else:
+    spotipy_module = None  # type: ignore
+    SpotifyOAuthClass = None  # type: ignore
 
 try:
     import spotipy
@@ -13,6 +21,8 @@ try:
     SPOTIPY_AVAILABLE = True
 except ImportError:
     SPOTIPY_AVAILABLE = False
+    spotipy = None  # type: ignore
+    SpotifyOAuth = None  # type: ignore
     print("⚠️  spotipy no instalado: pip install spotipy")
 
 
@@ -28,17 +38,17 @@ SPOTIFY_SCOPES = " ".join([
 
 class SpotifyPlayer:
     def __init__(self):
-        self._client: Optional["spotipy.Spotify"] = None
+        self._client: Optional[Any] = None  # spotipy.Spotify
         self._active_device_id: Optional[str] = None
 
     @property
-    def client(self) -> Optional["spotipy.Spotify"]:
+    def client(self) -> Optional[Any]:  # spotipy.Spotify
         if self._client is None:
             self._client = self._init_client()
         return self._client
 
-    def _init_client(self) -> Optional["spotipy.Spotify"]:
-        if not SPOTIPY_AVAILABLE:
+    def _init_client(self) -> Optional[Any]:  # spotipy.Spotify
+        if not SPOTIPY_AVAILABLE or spotipy is None or SpotifyOAuth is None:
             return None
 
         client_id = os.getenv("SPOTIFY_CLIENT_ID")
@@ -77,7 +87,7 @@ class SpotifyPlayer:
             return None
         try:
             devices = self.client.devices()
-            device_list = devices.get("devices", [])
+            device_list = devices.get("devices", []) if devices else []
 
             if not device_list:
                 print("⚠️  No hay dispositivos Spotify activos")
@@ -96,7 +106,7 @@ class SpotifyPlayer:
 
     def play(self, query: str) -> str:
         """Busca y reproduce una canción/artista/playlist"""
-        if not self.is_available():
+        if not self.is_available() or not self.client:
             return "Spotify no está disponible."
 
         device_id = self._get_active_device()
@@ -106,17 +116,17 @@ class SpotifyPlayer:
         try:
             # Buscar la canción
             results = self.client.search(q=query, type="track", limit=1)
-            tracks = results.get("tracks", {}).get("items", [])
+            tracks = results.get("tracks", {}).get("items", []) if results else []
 
             if not tracks:
                 # Intentar buscar como artista
                 results = self.client.search(q=query, type="artist", limit=1)
-                artists = results.get("artists", {}).get("items", [])
+                artists = results.get("artists", {}).get("items", []) if results else []
                 if artists:
                     # Reproducir top tracks del artista
                     artist_id = artists[0]["id"]
                     top_tracks = self.client.artist_top_tracks(artist_id, country="AR")
-                    track_uris = [t["uri"] for t in top_tracks["tracks"][:5]]
+                    track_uris = [t["uri"] for t in top_tracks.get("tracks", [])[:5]]
                     if track_uris:
                         self.client.start_playback(
                             device_id=device_id,
@@ -137,17 +147,16 @@ class SpotifyPlayer:
             )
             return f"▶️ {track_name} — {artist_name}"
 
-        except spotipy.exceptions.SpotifyException as e:
-            if "Premium" in str(e) or "403" in str(e):
-                return "Se necesita Spotify Premium para controlar la reproducción."
+        except Exception as e:
+            if spotipy and hasattr(spotipy, 'exceptions'):
+                if isinstance(e, spotipy.exceptions.SpotifyException):
+                    if "Premium" in str(e) or "403" in str(e):
+                        return "Se necesita Spotify Premium para controlar la reproducción."
             print(f"❌ Spotify error: {e}")
             return "Error al reproducir en Spotify."
-        except Exception as e:
-            print(f"❌ Error: {e}")
-            return "Error al conectar con Spotify."
 
     def pause(self) -> str:
-        if not self.is_available():
+        if not self.is_available() or not self.client:
             return "Spotify no disponible."
         try:
             playback = self.client.current_playback()
@@ -160,7 +169,7 @@ class SpotifyPlayer:
             return "No pude pausar."
 
     def resume(self) -> str:
-        if not self.is_available():
+        if not self.is_available() or not self.client:
             return "Spotify no disponible."
         try:
             device_id = self._get_active_device()
@@ -180,7 +189,7 @@ class SpotifyPlayer:
         return self._change_volume(-25)
 
     def _change_volume(self, delta: int) -> str:
-        if not self.is_available():
+        if not self.is_available() or not self.client:
             return "Spotify no disponible."
         try:
             playback = self.client.current_playback()
@@ -197,7 +206,7 @@ class SpotifyPlayer:
             return "No pude cambiar el volumen."
 
     def current_track(self) -> str:
-        if not self.is_available():
+        if not self.is_available() or not self.client:
             return "Spotify no disponible."
         try:
             playback = self.client.current_playback()
