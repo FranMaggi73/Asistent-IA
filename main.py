@@ -1,4 +1,4 @@
-# main.py - Jarvis sin Rasa, con CUDA y Spotify
+# main.py - Jarvis
 import asyncio
 import os
 import sys

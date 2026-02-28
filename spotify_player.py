@@ -1,4 +1,4 @@
-# spotify_player.py - Reemplaza VLC + yt-dlp con Spotify API
+# spotify_player.py - Spotify API
 # Requiere cuenta Spotify Premium para control de reproducción
 import os
 import time

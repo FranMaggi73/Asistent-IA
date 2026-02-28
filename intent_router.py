@@ -1,4 +1,4 @@
-# intent_router.py - Reemplaza Rasa con Ollama directo
+# intent_router.py - con Ollama directo
 import json
 import requests
 from typing import Optional

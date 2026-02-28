@@ -1,4 +1,4 @@
-# audio_listener.py - Pipeline principal sin Rasa
+# audio_listener.py - Pipeline principal
 import asyncio
 import time
 import uuid

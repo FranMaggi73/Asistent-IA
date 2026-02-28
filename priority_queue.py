@@ -14,7 +14,7 @@ class TaskPriority(IntEnum):
     """Niveles de prioridad (menor número = mayor prioridad)"""
     CRITICAL = 0   # Wake word detection, user input
     HIGH = 1       # Speech transcription, TTS
-    MEDIUM = 2     # Rasa query, action execution
+    MEDIUM = 2     # action execution
     LOW = 3        # Cache updates, logging
     BACKGROUND = 4 # Model preloading, cleanup
 

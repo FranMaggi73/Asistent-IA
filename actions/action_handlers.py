@@ -1,4 +1,4 @@
-# action_handlers.py - Handlers de acciones sin dependencia de Rasa
+# action_handlers.py - Handlers de acciones
 import os
 import subprocess
 import unicodedata
@@ -13,7 +13,7 @@ from intent_router import IntentResult
 
 
 # ─────────────────────────────────────────────
-# Desktop Cache (igual que antes, sin Rasa)
+# Desktop Cache
 # ─────────────────────────────────────────────
 
 @lru_cache(maxsize=1)
