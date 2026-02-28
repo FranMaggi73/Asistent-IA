@@ -26,6 +26,8 @@ Ejemplos:
 "pon Despacito de Luis Fonsi" -> {"intent": "play_music", "entity": "Despacito Luis Fonsi"}
 "sube el volumen" -> {"intent": "control_music", "entity": "subir"}
 "pausa la música" -> {"intent": "control_music", "entity": "pausa"}
+"pasá a la siguiente" -> {"intent": "control_music", "entity": "siguiente"}
+"canción anterior" -> {"intent": "control_music", "entity": "anterior"}
 "qué programas tengo" -> {"intent": "list_apps", "entity": null}
 "qué es la inteligencia artificial" -> {"intent": "general_question", "entity": null}
 
@@ -138,7 +140,8 @@ class IntentRouter:
             return IntentResult("play_music", None, text)
 
         if any(w in t for w in ['pausa', 'para', 'detén', 'reanuda', 'continúa',
-                                  'stop', 'sube', 'baja', 'volumen']):
+                          'stop', 'sube', 'baja', 'volumen', 'siguiente',
+                          'anterior', 'próxima', 'saltar', 'skip']):
             return IntentResult("control_music", t.split()[0], text)
 
         return IntentResult("general_question", None, text)

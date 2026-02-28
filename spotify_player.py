@@ -218,7 +218,28 @@ class SpotifyPlayer:
             return f"🎵 {name} — {artist}"
         except Exception:
             return "No pude obtener la canción actual."
+        
+    def next_track(self) -> str:
+        if not self.is_available() or not self.client:
+            return "Spotify no disponible."
+        try:
+            device_id = self._get_active_device()
+            self.client.next_track(device_id=device_id)
+            return "⏭ Siguiente"
+        except Exception as e:
+            print(f"❌ {e}")
+            return "No pude pasar a la siguiente."
 
+    def previous_track(self) -> str:
+        if not self.is_available() or not self.client:
+            return "Spotify no disponible."
+        try:
+            device_id = self._get_active_device()
+            self.client.previous_track(device_id=device_id)
+            return "⏮ Anterior"
+        except Exception as e:
+            print(f"❌ {e}")
+            return "No pude volver a la anterior."
 
 # Singleton global
 spotify_player = SpotifyPlayer()

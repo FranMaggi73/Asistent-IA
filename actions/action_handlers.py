@@ -173,6 +173,10 @@ def handle_control_music(result: IntentResult) -> str:
         return spotify_player.volume_down()
     elif any(w in text for w in ['qué suena', 'qué está', 'que canción', 'que suena']):
         return spotify_player.current_track()
+    elif any(w in text for w in ['siguiente', 'próxima', 'saltar', 'skip']):
+        return spotify_player.next_track()
+    elif any(w in text for w in ['anterior', 'atrás', 'volver']):
+        return spotify_player.previous_track()
     else:
         return "No entendí el comando de música."
 
