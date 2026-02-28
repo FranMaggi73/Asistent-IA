@@ -7,10 +7,9 @@
 *.sqlite3
 
 # -------------------------------
-# Archivos generados por Rasa
+# Archivos generados por ollama
 # -------------------------------
 /models/
-/.rasa/
 /logs/
 /tmp/
 
@@ -23,6 +22,9 @@
 *.pyo
 *.pyd
 *.swp
+/.venv
+/.keras
+/.cache
 
 # -------------------------------
 # Archivos del sistema operativo
