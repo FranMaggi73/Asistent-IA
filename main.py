@@ -1,4 +1,8 @@
 # main.py - Jarvis (CORREGIDO)
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent / "modules"))
+
 import asyncio
 import os
 import sys

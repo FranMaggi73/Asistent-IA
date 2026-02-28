@@ -25,7 +25,7 @@
 /.venv
 /.keras
 /.cache
-/actions/__pycache__/
+/modules/__pycache__/
 .spotify_cache
 # -------------------------------
 # Archivos del sistema operativo

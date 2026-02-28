@@ -8,8 +8,7 @@ from typing import Optional
 
 from audioFunctions import recordAudio, whisperTranscription, generateAudio
 from intent_router import IntentRouter
-# Importación corregida - debe estar en carpeta actions/
-from actions.action_handlers import dispatch
+from modules.action_handlers import dispatch
 from wake_word_detector import WakeWordDetector
 
 
