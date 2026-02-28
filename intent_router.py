@@ -83,7 +83,7 @@ class IntentRouter:
             response = requests.post(
                 self.generate_url,
                 json=payload,
-                timeout=8
+                timeout=20
             )
 
             if response.status_code != 200:

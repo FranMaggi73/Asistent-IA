@@ -25,6 +25,7 @@
 /.venv
 /.keras
 /.cache
+/actions/__pycache__/
 
 # -------------------------------
 # Archivos del sistema operativo
