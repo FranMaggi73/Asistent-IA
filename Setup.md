@@ -27,6 +27,8 @@ python -m venv .venv
 ## Paso 3 — Instalar dependencias
 
 ```powershell
+python.exe -m pip install --upgrade pip
+
 pip install -r requirements.txt
 ```
 

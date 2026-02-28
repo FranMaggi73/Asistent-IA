@@ -1,40 +1,60 @@
-# intent_router.py - con Ollama directo
+# intent_router.py
+# Clasificación por keywords como responsable principal.
+# Ollama queda exclusivamente para generate_response (preguntas abiertas).
+
+import unicodedata
 import json
 import requests
 from typing import Optional
 from dataclasses import dataclass
 
 
+# ─────────────────────────────────────────────
+# Intents soportados
+# ─────────────────────────────────────────────
+
 INTENTS = [
-    "greet",           # hola, buenos días, hey
-    "goodbye",         # adiós, hasta luego, chao
-    "open_app",        # abre chrome, ejecuta word, lanza steam
-    "list_apps",       # qué tengo, lista mis accesos, qué hay en el escritorio
-    "play_music",      # pon música, reproduce, toca una canción
-    "control_music",   # pausa, continúa, sube volumen, detén
-    "general_question" # cualquier otra pregunta o conversación
+    "greet",
+    "goodbye",
+    "open_app",
+    "list_apps",
+    "play_music",
+    "control_music",
+    "general_question",
 ]
 
-INTENT_PROMPT = """Eres un clasificador de intenciones para un asistente de voz en español.
-Dado el mensaje del usuario, responde SOLO con un objeto JSON con los campos:
-- "intent": una de estas opciones exactas: greet, goodbye, open_app, list_apps, play_music, control_music, general_question
-- "entity": el objeto o tema principal mencionado (nombre de app, canción, artista, etc.) o null si no hay
 
-Ejemplos:
-"hola" -> {"intent": "greet", "entity": null}
-"abre chrome" -> {"intent": "open_app", "entity": "chrome"}
-"pon Despacito de Luis Fonsi" -> {"intent": "play_music", "entity": "Despacito Luis Fonsi"}
-"sube el volumen" -> {"intent": "control_music", "entity": "subir"}
-"pausa la música" -> {"intent": "control_music", "entity": "pausa"}
-"pasá a la siguiente" -> {"intent": "control_music", "entity": "siguiente"}
-"canción anterior" -> {"intent": "control_music", "entity": "anterior"}
-"qué programas tengo" -> {"intent": "list_apps", "entity": null}
-"qué es la inteligencia artificial" -> {"intent": "general_question", "entity": null}
+# ─────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────
 
-Responde SOLO con el JSON, sin texto adicional, sin markdown.
+def _normalize(text: str) -> str:
+    """Minúsculas, sin tildes, sin puntuación extra"""
+    text = text.lower().strip()
+    text = ''.join(
+        c for c in unicodedata.normalize('NFD', text)
+        if unicodedata.category(c) != 'Mn'
+    )
+    # Quitar signos de puntuación que no aportan
+    for ch in '¿?¡!.,;:':
+        text = text.replace(ch, ' ')
+    # Colapsar espacios
+    return ' '.join(text.split())
 
-Mensaje: """
 
+def _extract_after(text: str, triggers: list[str]) -> Optional[str]:
+    """Extrae el fragmento que viene después del primer trigger encontrado"""
+    for trigger in triggers:
+        if trigger in text:
+            rest = text.split(trigger, 1)[1].strip()
+            if rest:
+                return rest
+    return None
+
+
+# ─────────────────────────────────────────────
+# Dataclass resultado
+# ─────────────────────────────────────────────
 
 @dataclass
 class IntentResult:
@@ -43,113 +63,189 @@ class IntentResult:
     raw_text: str
 
 
+# ─────────────────────────────────────────────
+# Clasificador por keywords (responsable principal)
+# ─────────────────────────────────────────────
+
+class KeywordClassifier:
+    """
+    Clasifica intents sin ninguna dependencia externa.
+    Latencia ~0ms. Cubre todos los casos de uso del asistente.
+    """
+
+    # Control de música: mapeamos keyword → entity normalizada
+    CONTROL_MAP = {
+        # Siguiente
+        'siguiente': 'siguiente', 'skip': 'siguiente',
+        'proxima': 'siguiente', 'proxima cancion': 'siguiente',
+        'saltar': 'siguiente',
+        # Anterior
+        'anterior': 'anterior', 'atras': 'anterior',
+        'volver': 'anterior', 'cancion anterior': 'anterior',
+        # Pausa
+        'pausa': 'pausa', 'pausar': 'pausa',
+        'para la musica': 'pausa', 'deten': 'pausa',
+        'detener': 'pausa', 'stop': 'pausa',
+        # Reanudar
+        'reanuda': 'play', 'reanudar': 'play',
+        'continua': 'play', 'continuar': 'play',
+        'seguir': 'play', 'sigue': 'play',
+        # Volumen arriba
+        'sube el volumen': 'subir', 'subir volumen': 'subir',
+        'mas volumen': 'subir', 'sube': 'subir',
+        'subir': 'subir',
+        # Volumen abajo
+        'baja el volumen': 'bajar', 'bajar volumen': 'bajar',
+        'menos volumen': 'bajar', 'baja': 'bajar',
+        'bajar': 'bajar',
+        # Info
+        'que suena': 'info', 'que esta sonando': 'info',
+        'que cancion es': 'info', 'que cancion suena': 'info',
+        'que cancion': 'info',
+    }
+
+    OPEN_TRIGGERS = [
+        'abre ', 'abrir ', 'ejecuta ', 'ejecutar ',
+        'lanza ', 'inicia ', 'iniciar ', 'muestra ',
+        'mostrar ', 'abrí ', 'ejecutá ', 'lanzá ',
+    ]
+
+    PLAY_TRIGGERS = [
+        'pon ', 'reproduce ', 'toca ', 'quiero escuchar ',
+        'pone ', 'ponme ', 'reproducir ', 'tocar ',
+        'escuchar ', 'poné ',
+    ]
+
+    LIST_KEYWORDS = [
+        'que tengo', 'que hay', 'lista de programas',
+        'listar programas', 'accesos directos',
+        'que programas', 'que aplicaciones', 'que apps',
+        'que tengo instalado',
+    ]
+
+    GREET_KEYWORDS = [
+        'hola', 'buenos dias', 'buenas tardes', 'buenas noches',
+        'buenas', 'hey', 'que tal', 'como estas', 'como andas',
+    ]
+
+    GOODBYE_KEYWORDS = [
+        'adios', 'hasta luego', 'chao', 'chau', 'bye',
+        'nos vemos', 'hasta pronto', 'hasta manana',
+        'me voy', 'apágate', 'apagate',
+    ]
+
+    MUSIC_GENERIC = [
+        'musica', 'una cancion', 'algo de musica',
+        'pon algo', 'pone algo', 'reproduce algo',
+    ]
+
+    def classify(self, text: str) -> IntentResult:
+        t = _normalize(text)
+
+        # ── Greet ──────────────────────────────────
+        if any(t == kw or t.startswith(kw + ' ') or t.endswith(' ' + kw)
+               for kw in self.GREET_KEYWORDS):
+            return IntentResult("greet", None, text)
+
+        # ── Goodbye ────────────────────────────────
+        if any(kw in t for kw in self.GOODBYE_KEYWORDS):
+            return IntentResult("goodbye", None, text)
+
+        # ── Control música (antes que play para evitar falsos positivos) ──
+        # Buscar frases más largas primero
+        for keyword in sorted(self.CONTROL_MAP, key=len, reverse=True):
+            if keyword in t:
+                return IntentResult("control_music", self.CONTROL_MAP[keyword], text)
+
+        # ── Open app ───────────────────────────────
+        for trigger in self.OPEN_TRIGGERS:
+            if trigger in t:
+                entity = t.split(trigger, 1)[1].strip()
+                # Limpiar palabras de relleno
+                stopwords = {'el', 'la', 'los', 'las', 'mi', 'por', 'favor'}
+                entity = ' '.join(w for w in entity.split() if w not in stopwords)
+                return IntentResult("open_app", entity or None, text)
+
+        # ── List apps ──────────────────────────────
+        if any(kw in t for kw in self.LIST_KEYWORDS):
+            return IntentResult("list_apps", None, text)
+
+        # ── Play música ────────────────────────────
+        for trigger in self.PLAY_TRIGGERS:
+            if trigger in t:
+                entity = t.split(trigger, 1)[1].strip()
+                # Quitar "algo de" al inicio
+                for prefix in ['algo de ', 'una cancion de ', 'musica de ']:
+                    if entity.startswith(prefix):
+                        entity = entity[len(prefix):]
+                return IntentResult("play_music", entity or None, text)
+
+        # Música genérica sin trigger explícito
+        if any(kw in t for kw in self.MUSIC_GENERIC):
+            return IntentResult("play_music", t, text)
+
+        # ── Fallback: pregunta general ─────────────
+        return IntentResult("general_question", None, text)
+
+
+# ─────────────────────────────────────────────
+# Intent Router (orquestador)
+# ─────────────────────────────────────────────
+
 class IntentRouter:
-    def __init__(self, base_url: str = "http://localhost:11434",
+    """
+    classify()         → KeywordClassifier (siempre, ~0ms)
+    generate_response() → Ollama (solo para general_question)
+    """
+
+    def __init__(self,
+                 base_url: str = "http://localhost:11434",
                  model: str = "llama3.2:3b"):
         self.base_url = base_url
         self.model = model
         self.generate_url = f"{base_url}/api/generate"
         self._available: Optional[bool] = None
+        self._classifier = KeywordClassifier()
+
+    # ── Clasificación ──────────────────────────
+
+    def classify(self, text: str) -> IntentResult:
+        """
+        Clasificación instantánea por keywords.
+        Ollama no participa aquí.
+        """
+        if not text or not text.strip():
+            return IntentResult("general_question", None, text)
+
+        result = self._classifier.classify(text)
+        print(f"🎯 Intent: {result.intent} | Entity: {result.entity}")
+        return result
+
+    # ── Disponibilidad Ollama ───────────────────
 
     def is_available(self) -> bool:
         if self._available is not None:
             return self._available
         try:
-            r = requests.get(f"{self.base_url}/api/tags", timeout=5)
+            r = requests.get(f"{self.base_url}/api/tags", timeout=3)
             self._available = r.status_code == 200
         except Exception:
             self._available = False
         return self._available
 
-    def classify(self, text: str) -> IntentResult:
-        """Clasifica el intent del texto usando Ollama"""
-        if not text or not text.strip():
-            return IntentResult("general_question", None, text)
+    def reset_availability(self) -> None:
+        """Forzar re-chequeo de Ollama en el próximo ciclo"""
+        self._available = None
 
-        # Fallback rápido con keywords si Ollama no está disponible
-        if not self.is_available():
-            print("⚠️  Ollama no disponible, usando clasificador por keywords")
-            return self._keyword_fallback(text)
-
-        try:
-            payload = {
-                "model": self.model,
-                "prompt": INTENT_PROMPT + f'"{text}"',
-                "stream": False,
-                "options": {
-                    "temperature": 0.1,  # Baja temperatura = más determinista
-                    "num_predict": 60
-                }
-            }
-
-            response = requests.post(
-                self.generate_url,
-                json=payload,
-                timeout=20
-            )
-
-            if response.status_code != 200:
-                return self._keyword_fallback(text)
-
-            raw = response.json().get("response", "").strip()
-
-            # Limpiar posibles backticks de markdown
-            raw = raw.replace("```json", "").replace("```", "").strip()
-
-            data = json.loads(raw)
-            intent = data.get("intent", "general_question")
-            entity = data.get("entity")
-
-            # Validar que el intent sea uno de los esperados
-            if intent not in INTENTS:
-                intent = "general_question"
-
-            print(f"🎯 Intent: {intent} | Entity: {entity}")
-            return IntentResult(intent, entity, text)
-
-        except (json.JSONDecodeError, Exception) as e:
-            print(f"⚠️  Intent classification error: {e}, usando fallback")
-            return self._keyword_fallback(text)
-
-    def _keyword_fallback(self, text: str) -> IntentResult:
-        """Clasificador simple por keywords como backup"""
-        t = text.lower()
-
-        if any(w in t for w in ['hola', 'buenos', 'buenas', 'hey', 'qué tal']):
-            return IntentResult("greet", None, text)
-
-        if any(w in t for w in ['adiós', 'adios', 'hasta luego', 'chao', 'bye']):
-            return IntentResult("goodbye", None, text)
-
-        if any(w in t for w in ['abre', 'abrir', 'ejecuta', 'lanza', 'inicia', 'muestra']):
-            words = t.split()
-            idx = next((i for i, w in enumerate(words)
-                       if w in ['abre', 'ejecuta', 'lanza', 'inicia']), -1)
-            entity = ' '.join(words[idx+1:]) if idx >= 0 else None
-            return IntentResult("open_app", entity, text)
-
-        if any(w in t for w in ['lista', 'listar', 'qué tengo', 'qué hay', 'accesos']):
-            return IntentResult("list_apps", None, text)
-
-        if any(w in t for w in ['pon', 'reproduce', 'toca', 'escuchar', 'música']):
-            # Extraer nombre de canción/artista
-            for prefix in ['pon ', 'reproduce ', 'toca ', 'quiero escuchar ']:
-                if prefix in t:
-                    entity = t.split(prefix, 1)[1].strip()
-                    return IntentResult("play_music", entity, text)
-            return IntentResult("play_music", None, text)
-
-        if any(w in t for w in ['pausa', 'para', 'detén', 'reanuda', 'continúa',
-                          'stop', 'sube', 'baja', 'volumen', 'siguiente',
-                          'anterior', 'próxima', 'saltar', 'skip']):
-            return IntentResult("control_music", t.split()[0], text)
-
-        return IntentResult("general_question", None, text)
+    # ── Generación de respuesta libre ──────────
 
     def generate_response(self, text: str, max_tokens: int = 80) -> str:
-        """Genera respuesta libre para preguntas generales"""
+        """
+        Genera respuesta libre para preguntas generales.
+        Único punto donde se usa Ollama.
+        """
         if not self.is_available():
-            return "El servicio de IA no está disponible en este momento."
+            return "El servicio de IA no está disponible. Probá con 'ollama serve'."
 
         system = (
             "Eres Jarvis, un asistente de voz inteligente y conciso. "
@@ -164,7 +260,7 @@ class IntentRouter:
                 "stream": False,
                 "options": {
                     "temperature": 0.7,
-                    "num_predict": max_tokens
+                    "num_predict": max_tokens,
                 }
             }
 
@@ -172,12 +268,13 @@ class IntentRouter:
 
             if r.status_code == 200:
                 response = r.json().get("response", "").strip()
-                # Limitar longitud para TTS
                 if len(response) > 300:
                     response = response[:297] + "..."
                 return response
 
         except Exception as e:
             print(f"❌ Ollama generate error: {e}")
+            # Marcar como no disponible para evitar timeouts en cascada
+            self._available = False
 
         return "No pude generar una respuesta en este momento."

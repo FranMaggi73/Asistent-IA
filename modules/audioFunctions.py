@@ -1,8 +1,7 @@
-# audioFunctions.py - Audio processing con CUDA optimizado (CORREGIDO)
-import warnings
+# audioFunctions.py - Audio processing con CUDA optimizado
 import importlib
 from functools import lru_cache
-from typing import Union, List, Any
+from typing import List, Any
 import numpy as np
 from numpy.typing import NDArray
 import time
@@ -27,15 +26,13 @@ except Exception:
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 if device == "cuda":
-    # Optimizaciones CUDA para RTX 2060
-    torch.backends.cudnn.benchmark = True       # Autotuning de kernels
-    torch.backends.cuda.matmul.allow_tf32 = True # TF32 para matmul (más rápido, ~misma precisión)
+    torch.backends.cudnn.benchmark = True
+    torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
-    torch.set_float32_matmul_precision('high')   # Permite TF32
+    torch.set_float32_matmul_precision('high')
     print(f"🚀 CUDA activo: {torch.cuda.get_device_name(0)}")
     print(f"   VRAM disponible: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
 else:
-    # Optimizaciones CPU
     torch.set_num_threads(4)
     torch.set_num_interop_threads(2)
     torch.set_flush_denormal(True)
@@ -43,7 +40,7 @@ else:
 
 
 # ─────────────────────────────────────────────
-# Model Manager (Whisper)
+# Model Manager (faster-whisper)
 # ─────────────────────────────────────────────
 
 class ModelManager:
@@ -63,21 +60,31 @@ class ModelManager:
         if self._whisper_model is None:
             with self._lock:
                 if self._whisper_model is None:
-                    print("⏳ Cargando Whisper...")
-                    import whisper
-                    with warnings.catch_warnings():
-                        warnings.filterwarnings("ignore", category=FutureWarning)
-                        # RTX 2060 (6GB): large-v2 en CUDA, small en CPU
-                        if device == "cuda":
-                            model_size = "large-v2"  # ~3GB VRAM
-                        else:
-                            model_size = "small"
-                        self._whisper_model = whisper.load_model(
-                            model_size,
-                            device=device
-                        )
-                    print(f"✅ Whisper cargado ({model_size} en {device.upper()})")
+                    self._load_whisper()
         return self._whisper_model
+
+    def _load_whisper(self) -> None:
+        from faster_whisper import WhisperModel
+
+        print("⏳ Cargando Whisper...")
+        t = time.time()
+
+        if device == "cuda":
+            self._whisper_model = WhisperModel(
+                "medium",
+                device="cuda",
+                compute_type="int8_float16",
+            )
+        else:
+            self._whisper_model = WhisperModel(
+                "small",
+                device="cpu",
+                compute_type="int8",
+            )
+
+        elapsed = time.time() - t
+        model_name = "medium (int8_float16)" if device == "cuda" else "small (int8)"
+        print(f"✅ Whisper cargado ({model_name} en {device.upper()}) — {elapsed:.1f}s")
 
     def unload_whisper(self) -> None:
         if self._whisper_model is not None:
@@ -94,59 +101,48 @@ model_manager = ModelManager()
 
 
 # ─────────────────────────────────────────────
-# Whisper Transcription con CUDA
+# Whisper Transcription con faster-whisper
 # ─────────────────────────────────────────────
 
 def whisperTranscription(audio_data: NDArray[np.int16], language: str = 'es') -> str:
-    """Transcripción con Whisper, optimizada para CUDA"""
     try:
         if len(audio_data) == 0:
             return ""
 
-        # Normalizar a float32
+        # Normalizar a float32 en rango [-1, 1]
         audio_float = audio_data.astype(np.float32) / 32768.0
 
-        # Saltar audio demasiado corto (< 0.5s)
-        if len(audio_float) < 22050:
+        # Aplanar a 1D — sounddevice puede devolver (N, 1)
+        if audio_float.ndim > 1:
+            audio_float = audio_float.mean(axis=1)
+
+        # Saltar audio demasiado corto (< 0.3s a 44100Hz)
+        if len(audio_float) < 13230:
             return ""
 
-        # Resample de 44100 → 16000 Hz (requerido por Whisper)
-        from scipy import signal as scipy_signal
-        orig_sr, target_sr = 44100, 16000
-        n_samples = int(len(audio_float) * target_sr / orig_sr)
-        
-        # scipy.signal.resample puede devolver tuple o ndarray dependiendo de la versión
-        resampled_result = scipy_signal.resample(audio_float, n_samples)
-        
-        # Manejar ambos casos
-        if isinstance(resampled_result, tuple):
-            resampled = resampled_result[0]  # Tomar primer elemento si es tuple
-        else:
-            resampled = resampled_result
-
-        # Asegurar que sea 1D
-        if resampled.ndim > 1:
-            resampled = resampled.mean(axis=1)
+        # Resamplear de 44100 a 16000Hz con interpolacion lineal
+        target_len = int(len(audio_float) * 16000 / 44100)
+        indices = np.linspace(0, len(audio_float) - 1, target_len)
+        audio_float = np.interp(indices, np.arange(len(audio_float)), audio_float).astype(np.float32)
 
         model = model_manager.whisper
 
-        result = model.transcribe(
-            resampled,
+        segments, _ = model.transcribe(
+            audio_float,
             language=language,
-            fp16=(device == "cuda"),       # FP16 en GPU = 2x más rápido
-            verbose=False,
+            beam_size=1,
+            vad_filter=True,
+            vad_parameters={
+                "min_silence_duration_ms": 400,
+                "speech_pad_ms": 200,
+            },
             condition_on_previous_text=False,
-            compression_ratio_threshold=2.4,
             no_speech_threshold=0.6,
-            beam_size=3,                   # Reducido para más velocidad
-            best_of=3,
-            task="transcribe"
+            compression_ratio_threshold=2.4,
         )
 
-        # result['text'] puede ser str o dict dependiendo de la versión de whisper
-        text_result = result.get('text', '') if isinstance(result, dict) else str(result)
-        text = text_result.strip() if isinstance(text_result, str) else ""
-        
+        text = "".join(s.text for s in segments).strip()
+
         if text:
             print(f"📝 User: {text}")
         return text
@@ -163,15 +159,15 @@ def whisperTranscription(audio_data: NDArray[np.int16], language: str = 'es') ->
 def recordAudio(silence_duration: float = 1.5,
                 volume_threshold: float = 12,
                 max_duration: float = 20) -> NDArray[np.int16]:
-    """Graba audio con detección de silencio adaptativa"""
+    """Graba audio con deteccion de silencio adaptativa"""
     from collections import deque
 
     fs = 44100
     chunk_size = 1024
     started_recording = False
     silence_start = None
-    buffer: deque = deque(maxlen=int(0.8 * fs))
-    full_recording: List[NDArray] = []  # Sin especificar dtype para evitar conflictos
+    buffer: deque = deque(maxlen=int(0.3 * fs / chunk_size))
+    full_recording: List[NDArray] = []
     start_time = time.time()
     energy_history: deque = deque(maxlen=30)
     adaptive_threshold = volume_threshold
@@ -181,13 +177,12 @@ def recordAudio(silence_duration: float = 1.5,
                             dtype=np.float32, blocksize=chunk_size) as stream:
             while True:
                 if time.time() - start_time > max_duration:
-                    print("⏱️  Duración máxima alcanzada")
+                    print("⏱️  Duracion maxima alcanzada")
                     break
 
                 audio_chunk, _ = stream.read(chunk_size)
                 volume = np.sqrt(np.mean(np.square(audio_chunk))) * 1000
 
-                # Umbral adaptativo
                 energy_history.append(volume)
                 if len(energy_history) == 30:
                     avg_noise = np.mean(list(energy_history)[:15])
@@ -198,7 +193,7 @@ def recordAudio(silence_duration: float = 1.5,
                 if not started_recording:
                     print("*Escuchando...*", end='\r', flush=True)
                     if volume > adaptive_threshold:
-                        print("*Grabando...*", end='\r', flush=True)
+                        print("*Grabando...*  ", end='\r', flush=True)
                         full_recording = list(buffer)
                         started_recording = True
                         silence_start = None
@@ -215,10 +210,12 @@ def recordAudio(silence_duration: float = 1.5,
 
         if full_recording:
             combined = np.concatenate(full_recording)
+            # Aplanar a 1D por si sounddevice devuelve (N, 1)
+            if combined.ndim > 1:
+                combined = combined.mean(axis=1)
             max_val = np.max(np.abs(combined))
             if max_val > 0:
-                normalized = combined / max_val * 32767
-                return normalized.astype(np.int16)
+                return (combined / max_val * 32767).astype(np.int16)
             return (combined * 32767).astype(np.int16)
 
         return np.array([], dtype=np.int16)
@@ -229,18 +226,17 @@ def recordAudio(silence_duration: float = 1.5,
 
 
 # ─────────────────────────────────────────────
-# TTS (Coqui-TTS) con CUDA
+# TTS (Coqui XTTS v2) con CUDA
 # ─────────────────────────────────────────────
 
 @lru_cache(maxsize=1)
 def get_tts_model() -> Any:
-    """Carga el modelo TTS con CUDA si está disponible"""
+    """Carga el modelo TTS con CUDA si esta disponible"""
     try:
         from TTS.api import TTS
     except ImportError:
         raise RuntimeError("coqui-tts no instalado: pip install coqui-tts")
 
-    # Safe globals para torch.load - versión corregida
     candidates = [
         "TTS.config.shared_configs.BaseDatasetConfig",
         "TTS.tts.configs.xtts_config.XttsConfig",
@@ -260,17 +256,14 @@ def get_tts_model() -> Any:
         except Exception:
             pass
 
-    if safe_globals:
+    if safe_globals and hasattr(torch.serialization, 'add_safe_globals'):
         try:
-            # Verificar si add_safe_globals existe
-            if hasattr(torch.serialization, 'add_safe_globals'):
-                torch.serialization.add_safe_globals(safe_globals)  # type: ignore[attr-defined]
+            torch.serialization.add_safe_globals(safe_globals)  # type: ignore[attr-defined]
         except Exception:
             pass
 
     print(f"⏳ Cargando TTS en {device.upper()}...")
-    use_gpu = (device == "cuda")
-    tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2", gpu=use_gpu)
+    tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2", gpu=(device == "cuda"))
     print(f"✅ TTS cargado en {device.upper()}")
     return tts
 
@@ -281,18 +274,15 @@ def generateAudio(text: str, speaker_file: str,
     if not text or not text.strip():
         return False
 
-    # Limitar longitud para evitar latencia excesiva
     if len(text) > 400:
         text = text[:397] + "..."
 
     try:
         tts = get_tts_model()
-
-        # Generar audio (la inferencia corre en CUDA automáticamente)
         wav = tts.tts(text=text, speaker_wav=speaker_file, language=language)
 
         if wav is None or len(wav) == 0:
-            print("❌ TTS devolvió audio vacío")
+            print("❌ TTS devolvio audio vacio")
             return False
 
         sd.play(wav, sample_rate)
@@ -305,11 +295,10 @@ def generateAudio(text: str, speaker_file: str,
 
 
 # ─────────────────────────────────────────────
-# VRAM Monitor (útil para debug con RTX 2060)
+# VRAM Monitor
 # ─────────────────────────────────────────────
 
 def print_cuda_stats() -> None:
-    """Muestra uso de VRAM"""
     if device != "cuda":
         return
     allocated = torch.cuda.memory_allocated(0) / 1024**3

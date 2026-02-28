@@ -1,4 +1,8 @@
 # main.py - Jarvis (CORREGIDO)
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "modules"))
