@@ -20,6 +20,7 @@ INTENTS = [
     "list_apps",
     "play_music",
     "control_music",
+    "reset_conversation",  # NUEVO: para reiniciar memoria
     "general_question",
 ]
 
@@ -111,9 +112,11 @@ class KeywordClassifier:
     ]
 
     PLAY_TRIGGERS = [
-        'pon ', 'reproduce ', 'toca ', 'quiero escuchar ',
-        'pone ', 'ponme ', 'reproducir ', 'tocar ',
-        'escuchar ', 'poné ',
+        'pon ', 'pone ', 'poneme ', 'ponme ', 'poned ', 'poné ',
+        'reproduce ', 'reproducir ', 'reproduci ',
+        'toca ', 'tocar ', 'tocame ',
+        'play ', 'plei ',  # Inglés y spanglish
+        'quiero escuchar ', 'escuchar ',
     ]
 
     LIST_KEYWORDS = [
@@ -134,6 +137,12 @@ class KeywordClassifier:
         'me voy', 'apágate', 'apagate',
     ]
 
+    RESET_KEYWORDS = [
+        'olvida', 'olvidate', 'olvida todo', 'nueva conversacion',
+        'reinicia', 'reiniciar', 'borra', 'borrar', 'empeza de nuevo',
+        'reset', 'limpiar memoria', 'no te acuerdes',
+    ]
+
     MUSIC_GENERIC = [
         'musica', 'una cancion', 'algo de musica',
         'pon algo', 'pone algo', 'reproduce algo',
@@ -150,6 +159,10 @@ class KeywordClassifier:
         # ── Goodbye ────────────────────────────────
         if any(kw in t for kw in self.GOODBYE_KEYWORDS):
             return IntentResult("goodbye", None, text)
+
+        # ── Reset conversación ─────────────────────
+        if any(kw in t for kw in self.RESET_KEYWORDS):
+            return IntentResult("reset_conversation", None, text)
 
         # ── Control música (antes que play para evitar falsos positivos) ──
         # Buscar frases más largas primero
@@ -195,13 +208,14 @@ class KeywordClassifier:
 class IntentRouter:
     """
     classify()         → KeywordClassifier (siempre, ~0ms)
-    generate_response() → Groq (si disponible) o Ollama local
+    generate_response() → Groq (si disponible) o Ollama local + memoria conversacional
     """
 
     def __init__(self,
                  base_url: str = "http://localhost:11434",
                  model: str = "llama3.2:1b",
-                 use_groq: bool = True):
+                 use_groq: bool = True,
+                 max_history: int = 6):  # NUEVO: últimos 6 mensajes (3 turnos)
         
         # Ollama config
         self.base_url = base_url
@@ -216,6 +230,10 @@ class IntentRouter:
         
         # Classifier
         self._classifier = KeywordClassifier()
+        
+        # NUEVO: Memoria conversacional
+        self.conversation_history: list = []
+        self.max_history = max_history
         
         # System prompt ULTRA-ESTRICTO para Groq
         self.system_prompt = (
@@ -289,14 +307,50 @@ class IntentRouter:
         self._groq_available = None
         self._ollama_available = None
 
+    # ── Gestión de memoria conversacional ──────
+
+    def add_to_history(self, user_msg: str, assistant_msg: str) -> None:
+        """Agrega un turno de conversación al historial"""
+        self.conversation_history.append({"role": "user", "content": user_msg})
+        self.conversation_history.append({"role": "assistant", "content": assistant_msg})
+        
+        # Mantener solo los últimos N mensajes
+        if len(self.conversation_history) > self.max_history:
+            self.conversation_history = self.conversation_history[-self.max_history:]
+    
+    def clear_history(self) -> None:
+        """Limpia la memoria conversacional"""
+        self.conversation_history = []
+        print("💭 Memoria conversacional reiniciada")
+    
+    def get_history_context(self) -> str:
+        """Retorna el historial formateado para Ollama (modo texto)"""
+        if not self.conversation_history:
+            return ""
+        
+        context = "\n\nConversación previa:\n"
+        for msg in self.conversation_history:
+            role = "Usuario" if msg["role"] == "user" else "Jarvis"
+            context += f"{role}: {msg['content']}\n"
+        return context
+
     # ── Generación de respuesta libre ──────────
 
     def _generate_with_groq(self, text: str, max_tokens: int = 30) -> Optional[str]:
-        """Genera respuesta usando Groq API (más rápido)"""
+        """Genera respuesta usando Groq API (más rápido) con memoria conversacional"""
         if not self.groq_api_key:
             return None
         
         try:
+            # Construir mensajes con historial
+            messages = [{"role": "system", "content": self.system_prompt}]
+            
+            # Agregar historial de conversación
+            messages.extend(self.conversation_history)
+            
+            # Agregar mensaje actual
+            messages.append({"role": "user", "content": text})
+            
             response = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={
@@ -305,14 +359,11 @@ class IntentRouter:
                 },
                 json={
                     "model": "llama-3.1-8b-instant",
-                    "messages": [
-                        {"role": "system", "content": self.system_prompt},
-                        {"role": "user", "content": text}
-                    ],
-                    "max_tokens": max_tokens,  # ← Reducido de 50 a 30
-                    "temperature": 0.5,         # ← Más determinístico (era 0.7)
-                    "top_p": 0.8,               # ← Más restrictivo (era 0.9)
-                    "stop": ["\n", "?"],        # ← NUEVO: detener en salto de línea o pregunta
+                    "messages": messages,
+                    "max_tokens": max_tokens,
+                    "temperature": 0.5,
+                    "top_p": 0.8,
+                    "stop": ["\n", "?"],
                 },
                 timeout=10
             )
@@ -323,14 +374,12 @@ class IntentRouter:
                 
                 # POST-PROCESAMIENTO: Cortar respuestas largas
                 words = answer.split()
-                if len(words) > 12:  # Límite estricto: 12 palabras máximo
+                if len(words) > 12:
                     answer = ' '.join(words[:12]) + '.'
                 
-                # Limpiar respuesta: remover preguntas de seguimiento
                 if "?" in answer:
                     answer = answer.split("?")[0] + "."
                 
-                # Límite de caracteres absoluto
                 if len(answer) > 120:
                     answer = answer[:117] + "..."
                 
@@ -343,20 +392,30 @@ class IntentRouter:
         return None
 
     def _generate_with_ollama(self, text: str, max_tokens: int = 40) -> Optional[str]:
-        """Genera respuesta usando Ollama local"""
+        """Genera respuesta usando Ollama local con memoria conversacional"""
         try:
+            # Construir prompt con historial
+            prompt = self.system_prompt
+            
+            # Agregar historial si existe
+            if self.conversation_history:
+                prompt += self.get_history_context()
+            
+            # Agregar mensaje actual
+            prompt += f"\n\nUsuario: {text}\nJarvis:"
+            
             payload = {
                 "model": self.model,
-                "prompt": f"{self.system_prompt}\n\nUsuario: {text}\nJarvis:",
+                "prompt": prompt,
                 "stream": False,
                 "options": {
-                    "temperature": 0.5,       # Más determinístico (era 0.6)
-                    "num_predict": max_tokens, # Reducido de 50 a 40
-                    "top_p": 0.8,             # Más restrictivo (era 0.9)
-                    "top_k": 30,              # Más restrictivo (era 40)
-                    "repeat_penalty": 1.3,    # Mayor penalización (era 1.2)
-                    "num_ctx": 512,
-                    "stop": ["\n", "?", "Usuario:"],  # ← NUEVO
+                    "temperature": 0.5,
+                    "num_predict": max_tokens,
+                    "top_p": 0.8,
+                    "top_k": 30,
+                    "repeat_penalty": 1.3,
+                    "num_ctx": 1024,  # ← Aumentado de 512 para soportar historial
+                    "stop": ["\n", "?", "Usuario:"],
                 }
             }
 
@@ -386,21 +445,25 @@ class IntentRouter:
 
     def generate_response(self, text: str, max_tokens: int = 30) -> str:
         """
-        Genera respuesta libre para preguntas generales.
+        Genera respuesta libre para preguntas generales con memoria conversacional.
         Intenta Groq primero (más rápido), fallback a Ollama.
         """
         # Intentar Groq primero (si está habilitado)
+        response = None
         if self._check_groq():
             response = self._generate_with_groq(text, max_tokens)
-            if response:
-                return response
-            print("⚠️  Groq falló, intentando con Ollama local...")
+            if not response:
+                print("⚠️  Groq falló, intentando con Ollama local...")
         
-        # Fallback a Ollama
-        if self._check_ollama():
+        # Fallback a Ollama si Groq no funcionó
+        if not response and self._check_ollama():
             response = self._generate_with_ollama(text, max_tokens)
-            if response:
-                return response
         
         # Si ambos fallan
-        return "No pude generar una respuesta. Verificá que Ollama esté corriendo."
+        if not response:
+            return "No pude generar una respuesta. Verificá que Ollama esté corriendo."
+        
+        # NUEVO: Agregar al historial conversacional
+        self.add_to_history(text, response)
+        
+        return response

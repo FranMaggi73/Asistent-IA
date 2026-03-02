@@ -72,20 +72,7 @@ class KeywordListener:
 
     async def handle_command(self) -> None:
         """
-        Pipeline con paralelismo donde es posible:
-
-        [grabar] ──────────────────────────────────────────┐
-                                                           ▼
-                                                    [transcribir]
-                                                           │
-                                                    [clasificar] ~0ms
-                                                           │
-                              ┌────────────────────────────┤
-                              ▼                            ▼
-                        [ejecutar acción]         (si general_question)
-                              │                    [Groq/Ollama genera]
-                              ▼                            │
-                           [TTS] ◄─────────────────────────┘
+        Pipeline con paralelismo donde es posible + memoria conversacional
         """
         start = time.time()
         loop = asyncio.get_event_loop()
@@ -142,32 +129,32 @@ class KeywordListener:
     async def _execute(self, loop: asyncio.AbstractEventLoop,
                        intent_result: IntentResult) -> str:
         """
-        Estrategia de ejecución según intent:
-
-        - Acciones CONCRETAS (open_app, control_music, play_music, list_apps):
-          dispatch directo, sin LLM (respuestas hardcodeadas cortas).
-
-        - Conversación NATURAL (greet, goodbye, general_question):
-          dispatch llama a router.generate_response() para respuesta del LLM.
+        Estrategia de ejecución según intent con soporte para memoria conversacional
         """
 
-        # Acciones concretas: rápidas, sin LLM
+        # Acciones concretas sin LLM
         fast_intents = {
             "open_app", "list_apps", "play_music", "control_music"
-            # ← greet y goodbye NO están aquí, van al LLM
         }
 
+        # Reset necesita router (para limpiar historial) pero no usa LLM
+        if intent_result.intent == "reset_conversation":
+            response = await loop.run_in_executor(
+                executor,
+                partial(dispatch, intent_result, self.router)
+            )
+            return response
+
         if intent_result.intent in fast_intents:
-            # Acciones concretas sin LLM
+            # Acciones concretas sin LLM ni router
             response = await loop.run_in_executor(
                 executor,
                 partial(dispatch, intent_result)
-                # No pasamos router: estas acciones nunca lo necesitan
             )
             return response
 
         # Conversación natural: greet, goodbye, general_question
-        # Todas estas necesitan el router para generar respuesta del LLM
+        # Usa router.generate_response() que incluye memoria conversacional
         response = await loop.run_in_executor(
             executor,
             partial(dispatch, intent_result, self.router)
@@ -183,8 +170,8 @@ class KeywordListener:
         No hablar si la acción ya se confirmó con un símbolo
         (evita latencia de TTS para acciones triviales)
         """
-        action_intents = {"open_app", "play_music", "control_music"}
-        success_symbols = {"✓", "▶️", "⏸", "⏹", "🔊", "🔉", "⏭", "⏮"}
+        action_intents = {"open_app", "play_music", "control_music", "reset_conversation"}
+        success_symbols = {"✓", "▶️", "⏸", "⏹", "🔊", "🔉", "⏭", "⏮", "💭"}
 
         if intent in action_intents and any(s in response for s in success_symbols):
             return False

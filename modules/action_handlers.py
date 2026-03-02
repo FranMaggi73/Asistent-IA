@@ -182,6 +182,11 @@ def handle_control_music(result: IntentResult) -> str:
         return "No entendí el comando de música."
 
 
+def handle_reset_conversation(_result: IntentResult) -> str:
+    """Reinicia la memoria conversacional"""
+    return "Memoria reiniciada."  # El reset real se hace en el dispatcher
+
+
 # ─────────────────────────────────────────────
 # Dispatcher principal
 # ─────────────────────────────────────────────
@@ -193,13 +198,17 @@ def dispatch(result: IntentResult, ollama_router=None) -> str:
         "list_apps":        handle_list_apps,
         "play_music":       handle_play_music,
         "control_music":    handle_control_music,
+        "reset_conversation": handle_reset_conversation,  # NUEVO
     }
 
     handler = handlers.get(result.intent)
     if handler:
+        # Si es reset_conversation, limpiar el historial primero
+        if result.intent == "reset_conversation" and ollama_router:
+            ollama_router.clear_history()
         return handler(result)
 
-    # TODO: greet, goodbye, general_question → Ollama/Groq
+    # greet, goodbye, general_question → Ollama/Groq
     # Todas las preguntas conversacionales pasan por el LLM
     if ollama_router:
         return ollama_router.generate_response(result.raw_text)
