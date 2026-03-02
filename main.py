@@ -1,4 +1,4 @@
-# main.py - Jarvis (CORREGIDO)
+# main.py - Jarvis (OPTIMIZADO)
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
@@ -54,19 +54,46 @@ class JarvisAssistant:
 
         print("\n🔍 Verificando servicios...")
 
+        # Groq API
+        groq_key = os.getenv("GROQ_API_KEY")
+        if groq_key:
+            try:
+                r = requests.get(
+                    "https://api.groq.com/openai/v1/models",
+                    headers={"Authorization": f"Bearer {groq_key}"},
+                    timeout=2
+                )
+                if r.status_code == 200:
+                    print("✅ Groq API configurada (LLM ultra-rápido en la nube)")
+                else:
+                    print("⚠️  Groq API key inválida")
+            except Exception:
+                print("⚠️  Groq API no disponible (sin conexión)")
+        else:
+            print("⚠️  Groq API no configurada — se usará Ollama local")
+            print("   Obtené API key gratis en: https://console.groq.com")
+
         # Ollama
         try:
             r = requests.get("http://localhost:11434/api/tags", timeout=3)
             if r.status_code == 200:
                 models = [m["name"] for m in r.json().get("models", [])]
-                print(f"✅ Ollama OK — modelos: {', '.join(models) or 'ninguno'}")
-                if not models:
-                    print("   ⚠️  Sin modelos. Ejecutá: ollama pull llama3.2:3b")
+                if "llama3.2:1b" in models:
+                    print(f"✅ Ollama OK — modelo llama3.2:1b disponible")
+                elif models:
+                    print(f"⚠️  Ollama OK pero llama3.2:1b no encontrado")
+                    print(f"   Modelos: {', '.join(models)}")
+                    print("   Ejecutá: ollama pull llama3.2:1b")
+                else:
+                    print("⚠️  Ollama sin modelos. Ejecutá: ollama pull llama3.2:1b")
             else:
                 print("⚠️  Ollama no responde bien")
         except Exception:
-            print("⚠️  Ollama no disponible — respuestas generales limitadas")
-            print("   Iniciá con: ollama serve")
+            if not groq_key:
+                print("⚠️  Ollama no disponible — respuestas generales no funcionarán")
+                print("   Iniciá con: ollama serve")
+            else:
+                print("ℹ️  Ollama no disponible pero Groq está configurado")
 
         # Spotify
         spotify_id = os.getenv("SPOTIFY_CLIENT_ID")
@@ -94,8 +121,15 @@ class JarvisAssistant:
         def load_tts() -> bool:
             try:
                 t = time.time()
-                from audioFunctions import get_tts_model
-                get_tts_model()
+                from audioFunctions import get_tts_model, _get_speaker_embeddings
+                tts = get_tts_model()
+                
+                # OPTIMIZACIÓN: Pre-computar embeddings del speaker
+                speaker = Path(__file__).parent / "speaker.wav"
+                if speaker.exists():
+                    print("🔊 Pre-computando speaker embeddings...")
+                    _get_speaker_embeddings(tts, str(speaker))
+                
                 print(f"✅ TTS listo ({time.time()-t:.1f}s)")
                 return True
             except Exception as e:
@@ -129,7 +163,7 @@ class JarvisAssistant:
 
         # Banner
         print("=" * 60)
-        print("🎙️  JARVIS — Ollama + Spotify + CUDA")
+        print("🎙️  JARVIS — OPTIMIZADO (Groq + llama3.2:1b + XTTS caché)")
         print("=" * 60)
 
         if not self.validate_files(str(wake_word), str(speaker), str(model_file)):
@@ -144,7 +178,7 @@ class JarvisAssistant:
         self.setup_signal_handlers()
         self.check_services()
 
-        # Pre-cargar modelos
+        # Pre-cargar modelos (incluye warmup de embeddings)
         await self.preload_models()
 
         print("\n" + "=" * 60)
@@ -158,7 +192,7 @@ class JarvisAssistant:
             self.listener = KeywordListener(
                 wake_word_file=str(wake_word),
                 speaker_file=str(speaker),
-                model_file=model_file_str  # Ahora es Optional[str]
+                model_file=model_file_str
             )
 
             listen_task   = asyncio.create_task(self.listener.start_listening())

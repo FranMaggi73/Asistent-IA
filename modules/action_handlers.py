@@ -1,4 +1,5 @@
 # action_handlers.py - Handlers de acciones
+# SOLO respuestas hardcodeadas para acciones concretas, NO para conversación
 import os
 import subprocess
 import unicodedata
@@ -181,24 +182,6 @@ def handle_control_music(result: IntentResult) -> str:
         return "No entendí el comando de música."
 
 
-def handle_greet(_result: IntentResult) -> str:
-    import random
-    return random.choice([
-        "Hola, ¿en qué puedo ayudarte?",
-        "Hola, dime.",
-        "¡Hola! ¿Qué necesitás?"
-    ])
-
-
-def handle_goodbye(_result: IntentResult) -> str:
-    import random
-    return random.choice([
-        "Hasta luego.",
-        "Adiós.",
-        "Nos vemos."
-    ])
-
-
 # ─────────────────────────────────────────────
 # Dispatcher principal
 # ─────────────────────────────────────────────
@@ -206,8 +189,6 @@ def handle_goodbye(_result: IntentResult) -> str:
 def dispatch(result: IntentResult, ollama_router=None) -> str:
     """Rutea el intent al handler correspondiente"""
     handlers = {
-        "greet":            handle_greet,
-        "goodbye":          handle_goodbye,
         "open_app":         handle_open_app,
         "list_apps":        handle_list_apps,
         "play_music":       handle_play_music,
@@ -218,7 +199,8 @@ def dispatch(result: IntentResult, ollama_router=None) -> str:
     if handler:
         return handler(result)
 
-    # general_question → Ollama
+    # TODO: greet, goodbye, general_question → Ollama/Groq
+    # Todas las preguntas conversacionales pasan por el LLM
     if ollama_router:
         return ollama_router.generate_response(result.raw_text)
 

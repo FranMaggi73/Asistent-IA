@@ -1,10 +1,10 @@
-# intent_router.py
-# Clasificación por keywords como responsable principal.
-# Ollama queda exclusivamente para generate_response (preguntas abiertas).
+# intent_router.py - VERSIÓN CORREGIDA
+# Prompt más estricto para respuestas cortas
 
 import unicodedata
 import json
 import requests
+import os
 from typing import Optional
 from dataclasses import dataclass
 
@@ -195,24 +195,46 @@ class KeywordClassifier:
 class IntentRouter:
     """
     classify()         → KeywordClassifier (siempre, ~0ms)
-    generate_response() → Ollama (solo para general_question)
+    generate_response() → Groq (si disponible) o Ollama local
     """
 
     def __init__(self,
                  base_url: str = "http://localhost:11434",
-                 model: str = "llama3.2:3b"):
+                 model: str = "llama3.2:1b",
+                 use_groq: bool = True):
+        
+        # Ollama config
         self.base_url = base_url
         self.model = model
         self.generate_url = f"{base_url}/api/generate"
-        self._available: Optional[bool] = None
+        self._ollama_available: Optional[bool] = None
+        
+        # Groq config
+        self.use_groq = use_groq
+        self.groq_api_key = os.getenv("GROQ_API_KEY")
+        self._groq_available: Optional[bool] = None
+        
+        # Classifier
         self._classifier = KeywordClassifier()
+        
+        # System prompt ULTRA-ESTRICTO para Groq
+        self.system_prompt = (
+            "Eres Jarvis. Responde en MÁXIMO 10 PALABRAS. "
+            "Prohíbido exceder 10 palabras bajo cualquier circunstancia. "
+            "Sé directo y conciso. Sin preguntas de seguimiento.\n\n"
+            "Ejemplos CORRECTOS:\n"
+            "Usuario: '¿Qué es Python?' → 'Lenguaje de programación creado en 1991.'\n"
+            "Usuario: '¿Cómo estás?' → 'Funcionando perfectamente.'\n"
+            "Usuario: 'Contame un chiste' → 'Los átomos no se fían, lo hacen todo de materia.'\n"
+            "Usuario: '¿Qué hiciste hoy?' → 'Actualicé sistemas y optimicé protocolos.'"
+        )
 
     # ── Clasificación ──────────────────────────
 
     def classify(self, text: str) -> IntentResult:
         """
         Clasificación instantánea por keywords.
-        Ollama no participa aquí.
+        LLM no participa aquí.
         """
         if not text or not text.strip():
             return IntentResult("general_question", None, text)
@@ -221,46 +243,120 @@ class IntentRouter:
         print(f"🎯 Intent: {result.intent} | Entity: {result.entity}")
         return result
 
-    # ── Disponibilidad Ollama ───────────────────
+    # ── Disponibilidad servicios ───────────────
 
-    def is_available(self) -> bool:
-        if self._available is not None:
-            return self._available
+    def _check_groq(self) -> bool:
+        """Verifica si Groq está disponible"""
+        if self._groq_available is not None:
+            return self._groq_available
+        
+        if not self.use_groq or not self.groq_api_key:
+            self._groq_available = False
+            return False
+        
+        try:
+            # Test rápido de conectividad
+            response = requests.get(
+                "https://api.groq.com/openai/v1/models",
+                headers={"Authorization": f"Bearer {self.groq_api_key}"},
+                timeout=2
+            )
+            self._groq_available = response.status_code == 200
+        except Exception:
+            self._groq_available = False
+        
+        return self._groq_available
+
+    def _check_ollama(self) -> bool:
+        """Verifica si Ollama está disponible"""
+        if self._ollama_available is not None:
+            return self._ollama_available
+        
         try:
             r = requests.get(f"{self.base_url}/api/tags", timeout=3)
-            self._available = r.status_code == 200
+            self._ollama_available = r.status_code == 200
         except Exception:
-            self._available = False
-        return self._available
+            self._ollama_available = False
+        
+        return self._ollama_available
+
+    def is_available(self) -> bool:
+        """Verifica si hay algún servicio LLM disponible"""
+        return self._check_groq() or self._check_ollama()
 
     def reset_availability(self) -> None:
-        """Forzar re-chequeo de Ollama en el próximo ciclo"""
-        self._available = None
+        """Forzar re-chequeo de servicios en el próximo ciclo"""
+        self._groq_available = None
+        self._ollama_available = None
 
     # ── Generación de respuesta libre ──────────
 
-    def generate_response(self, text: str, max_tokens: int = 80) -> str:
-        """
-        Genera respuesta libre para preguntas generales.
-        Único punto donde se usa Ollama.
-        """
-        if not self.is_available():
-            return "El servicio de IA no está disponible. Probá con 'ollama serve'."
+    def _generate_with_groq(self, text: str, max_tokens: int = 30) -> Optional[str]:
+        """Genera respuesta usando Groq API (más rápido)"""
+        if not self.groq_api_key:
+            return None
+        
+        try:
+            response = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.groq_api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "llama-3.1-8b-instant",
+                    "messages": [
+                        {"role": "system", "content": self.system_prompt},
+                        {"role": "user", "content": text}
+                    ],
+                    "max_tokens": max_tokens,  # ← Reducido de 50 a 30
+                    "temperature": 0.5,         # ← Más determinístico (era 0.7)
+                    "top_p": 0.8,               # ← Más restrictivo (era 0.9)
+                    "stop": ["\n", "?"],        # ← NUEVO: detener en salto de línea o pregunta
+                },
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                answer = result["choices"][0]["message"]["content"].strip()
+                
+                # POST-PROCESAMIENTO: Cortar respuestas largas
+                words = answer.split()
+                if len(words) > 12:  # Límite estricto: 12 palabras máximo
+                    answer = ' '.join(words[:12]) + '.'
+                
+                # Limpiar respuesta: remover preguntas de seguimiento
+                if "?" in answer:
+                    answer = answer.split("?")[0] + "."
+                
+                # Límite de caracteres absoluto
+                if len(answer) > 120:
+                    answer = answer[:117] + "..."
+                
+                return answer
+            
+        except Exception as e:
+            print(f"⚠️  Groq error: {e}")
+            self._groq_available = False
+        
+        return None
 
-        system = (
-            "Eres Jarvis, un asistente de voz inteligente y conciso. "
-            "Responde en español, de forma breve (máximo 2 oraciones). "
-            "Tus respuestas deben ser fáciles de escuchar en voz alta."
-        )
-
+    def _generate_with_ollama(self, text: str, max_tokens: int = 40) -> Optional[str]:
+        """Genera respuesta usando Ollama local"""
         try:
             payload = {
                 "model": self.model,
-                "prompt": f"{system}\n\nUsuario: {text}\nJarvis:",
+                "prompt": f"{self.system_prompt}\n\nUsuario: {text}\nJarvis:",
                 "stream": False,
                 "options": {
-                    "temperature": 0.7,
-                    "num_predict": max_tokens,
+                    "temperature": 0.5,       # Más determinístico (era 0.6)
+                    "num_predict": max_tokens, # Reducido de 50 a 40
+                    "top_p": 0.8,             # Más restrictivo (era 0.9)
+                    "top_k": 30,              # Más restrictivo (era 40)
+                    "repeat_penalty": 1.3,    # Mayor penalización (era 1.2)
+                    "num_ctx": 512,
+                    "stop": ["\n", "?", "Usuario:"],  # ← NUEVO
                 }
             }
 
@@ -268,13 +364,43 @@ class IntentRouter:
 
             if r.status_code == 200:
                 response = r.json().get("response", "").strip()
-                if len(response) > 300:
-                    response = response[:297] + "..."
+                
+                # POST-PROCESAMIENTO igual que Groq
+                words = response.split()
+                if len(words) > 12:
+                    response = ' '.join(words[:12]) + '.'
+                
+                if "?" in response:
+                    response = response.split("?")[0] + "."
+                
+                if len(response) > 120:
+                    response = response[:117] + "..."
+                
                 return response
 
         except Exception as e:
-            print(f"❌ Ollama generate error: {e}")
-            # Marcar como no disponible para evitar timeouts en cascada
-            self._available = False
+            print(f"❌ Ollama error: {e}")
+            self._ollama_available = False
+        
+        return None
 
-        return "No pude generar una respuesta en este momento."
+    def generate_response(self, text: str, max_tokens: int = 30) -> str:
+        """
+        Genera respuesta libre para preguntas generales.
+        Intenta Groq primero (más rápido), fallback a Ollama.
+        """
+        # Intentar Groq primero (si está habilitado)
+        if self._check_groq():
+            response = self._generate_with_groq(text, max_tokens)
+            if response:
+                return response
+            print("⚠️  Groq falló, intentando con Ollama local...")
+        
+        # Fallback a Ollama
+        if self._check_ollama():
+            response = self._generate_with_ollama(text, max_tokens)
+            if response:
+                return response
+        
+        # Si ambos fallan
+        return "No pude generar una respuesta. Verificá que Ollama esté corriendo."
