@@ -83,7 +83,7 @@ class KeywordListener:
                               ┌────────────────────────────┤
                               ▼                            ▼
                         [ejecutar acción]         (si general_question)
-                              │                    [Ollama genera]
+                              │                    [Groq/Ollama genera]
                               ▼                            │
                            [TTS] ◄─────────────────────────┘
         """
@@ -144,22 +144,21 @@ class KeywordListener:
         """
         Estrategia de ejecución según intent:
 
-        - Acciones rápidas (open_app, control_music, play_music, greet, goodbye,
-          list_apps): dispatch directo, sin Ollama.
+        - Acciones CONCRETAS (open_app, control_music, play_music, list_apps):
+          dispatch directo, sin LLM (respuestas hardcodeadas cortas).
 
-        - general_question: dispatch llama a router.generate_response() que
-          es el único punto que toca Ollama.
+        - Conversación NATURAL (greet, goodbye, general_question):
+          dispatch llama a router.generate_response() para respuesta del LLM.
         """
 
-        # Acciones instantáneas: lanzar en executor pero sin overhead de Ollama
+        # Acciones concretas: rápidas, sin LLM
         fast_intents = {
-            "open_app", "list_apps", "play_music",
-            "control_music", "greet", "goodbye",
+            "open_app", "list_apps", "play_music", "control_music"
+            # ← greet y goodbye NO están aquí, van al LLM
         }
 
         if intent_result.intent in fast_intents:
-            # dispatch es síncrono pero puede hacer I/O (Spotify, filesystem)
-            # lo corremos en executor para no bloquear el event loop
+            # Acciones concretas sin LLM
             response = await loop.run_in_executor(
                 executor,
                 partial(dispatch, intent_result)
@@ -167,7 +166,8 @@ class KeywordListener:
             )
             return response
 
-        # general_question: dispatch llama a router.generate_response
+        # Conversación natural: greet, goodbye, general_question
+        # Todas estas necesitan el router para generar respuesta del LLM
         response = await loop.run_in_executor(
             executor,
             partial(dispatch, intent_result, self.router)
